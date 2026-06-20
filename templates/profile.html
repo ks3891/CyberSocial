@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Profile | NovaLink</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ================= NAVBAR ================= -->
+<nav class="navbar">
+
+    <div>
+        <span class="logo">NovaLink</span>
+    </div>
+
+    <div class="nav-links">
+        <a href="/feed">🏠 Home</a>
+        <a href="/logout">🚪 Logout</a>
+    </div>
+
+</nav>
+
+<!-- ================= PROFILE HEADER ================= -->
+<div class="profile-card">
+
+    <div class="avatar" style="width:90px;height:90px;font-size:32px;margin:auto;">
+        {{ user[1][0]|upper }}
+    </div>
+
+    <h1 class="profile-name">{{ user[1] }}</h1>
+    <p style="color:gray;">@{{ user[1] }}</p>
+
+    <div class="stats">
+        <div>
+            <div class="stat-number">{{ followers_count }}</div>
+            <div>Followers</div>
+        </div>
+
+        <div>
+            <div class="stat-number">{{ following_count }}</div>
+            <div>Following</div>
+        </div>
+    </div>
+
+    {% if session["user_id"] != user[0] %}
+    <a href="/follow/{{ user[0] }}">
+        <button>
+            {% if is_following %}Unfollow{% else %}Follow{% endif %}
+        </button>
+    </a>
+    {% endif %}
+
+</div>
+
+<!-- ================= POSTS (SAME AS FEED) ================= -->
+<div class="feed-main">
+
+    {% for post in posts %}
+    <div class="post">
+
+        <!-- HEADER -->
+        <div class="post-header">
+
+            <div class="avatar">
+                {{ user[1][0]|upper }}
+            </div>
+
+            <div>
+                <a class="post-user">{{ user[1] }}</a>
+                <div class="post-username">@{{ user[1] }}</div>
+            </div>
+
+        </div>
+
+        <!-- CONTENT -->
+        <div class="post-content">
+            {{ post[0] }}
+        </div>
+
+        <!-- ACTIONS -->
+        <div class="post-actions">
+            <a class="like-btn">❤️ Like</a>
+        </div>
+
+    </div>
+    {% endfor %}
+
+</div>
+
+</body>
+</html>

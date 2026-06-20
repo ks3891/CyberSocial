@@ -1,0 +1,893 @@
+/* =========================
+   NOVALINK GLOBAL STYLES
+========================= */
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family: "Segoe UI", sans-serif;
+}
+
+body{
+    background:#f4f6f9;
+    color:#333;
+}
+
+/* =========================
+   NAVBAR (KEEP AS BEFORE)
+========================= */
+
+.navbar{
+    background:#1e3a8a;
+    color:white;
+    padding:15px 40px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.logo{
+    font-size:28px;
+    font-weight:bold;
+}
+
+.tagline{
+    font-size:14px;
+    opacity:0.8;
+}
+
+.nav-links a{
+    color:white;
+    text-decoration:none;
+    margin-left:20px;
+    font-weight:500;
+}
+
+/* =========================
+   HOME PAGE
+========================= */
+
+.hero{
+    height:85vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    text-align:center;
+}
+
+.hero-content h1{
+    font-size:60px;
+    color:#1e3a8a;
+    margin-bottom:10px;
+}
+
+.hero-content p{
+    font-size:20px;
+    color:#666;
+    margin-bottom:30px;
+}
+
+.btn{
+    background:#1e3a8a;
+    color:white;
+    text-decoration:none;
+    padding:12px 25px;
+    border-radius:8px;
+    margin:10px;
+    display:inline-block;
+    transition:0.3s;
+}
+
+.btn:hover{
+    background:#163172;
+}
+
+/* =========================
+   AUTH PAGES - EXACTLY AS BEFORE
+========================= */
+
+.auth-container{
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+.auth-card{
+    background:white;
+    padding:40px;
+    width:400px;
+    border-radius:15px;
+    box-shadow:0 5px 20px rgba(0,0,0,0.1);
+}
+
+.auth-card h2{
+    text-align:center;
+    margin-bottom:20px;
+    color:#1e3a8a;
+}
+
+.auth-card input{
+    width:100%;
+    padding:12px;
+    margin-bottom:15px;
+    border:1px solid #ddd;
+    border-radius:8px;
+}
+
+.auth-card button{
+    width:100%;
+    padding:12px;
+    border:none;
+    background:#1e3a8a;
+    color:white;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+.auth-card button:hover{
+    background:#163172;
+}
+
+/* =========================
+   FEED - TWITTER STYLE
+========================= */
+
+.feed-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: 260px 1fr 280px;
+    gap: 24px;
+}
+
+/* LEFT SIDEBAR */
+.sidebar {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e6ecf0;
+    padding: 16px;
+    position: sticky;
+    top: 80px;
+    height: fit-content;
+}
+
+.sidebar-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 16px;
+}
+
+.sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f2f5;
+}
+
+.sidebar-user:last-child {
+    border-bottom: none;
+}
+
+.sidebar-user .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #1e3a8a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.sidebar-user-name {
+    font-size: 14px;
+    color: #1a1a2e;
+    text-decoration: none;
+    flex: 1;
+}
+
+.sidebar-user-name:hover {
+    text-decoration: underline;
+}
+
+.sidebar-user button {
+    padding: 4px 14px;
+    border: 1px solid #1e3a8a;
+    border-radius: 20px;
+    background: white;
+    color: #1e3a8a;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sidebar-user button:hover {
+    background: #f0f4ff;
+}
+
+/* MAIN FEED */
+.feed-main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* CREATE POST - Twitter Style */
+.create-post {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e6ecf0;
+    padding: 16px;
+}
+
+.create-post-header {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.create-post .avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #1e3a8a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.create-post form {
+    flex: 1;
+}
+
+.create-post textarea {
+    width: 100%;
+    padding: 12px 0;
+    border: none;
+    font-size: 18px;
+    resize: none;
+    outline: none;
+    font-family: inherit;
+    min-height: 60px;
+}
+
+.create-post textarea::placeholder {
+    color: #8899aa;
+}
+
+.create-post-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 12px;
+    border-top: 1px solid #e6ecf0;
+}
+
+.create-post-actions button {
+    padding: 8px 24px;
+    background: #1e3a8a;
+    color: white;
+    border: none;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.create-post-actions button:hover {
+    background: #163172;
+}
+
+/* POSTS - Twitter Style */
+.post {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e6ecf0;
+    padding: 16px;
+    transition: background 0.2s;
+}
+
+.post:hover {
+    background: #fafbfc;
+}
+
+.post-header {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.post-header .avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #1e3a8a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.post-user-info {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.post-user-details {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.post-user {
+    font-weight: 700;
+    color: #0f1419;
+    font-size: 15px;
+    text-decoration: none;
+}
+
+.post-user:hover {
+    text-decoration: underline;
+}
+
+.post-username {
+    color: #71767b;
+    font-size: 14px;
+}
+
+.post-timestamp {
+    color: #71767b;
+    font-size: 14px;
+}
+
+.post-content {
+    padding-left: 60px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #0f1419;
+    margin-bottom: 12px;
+    word-wrap: break-word;
+}
+
+/* POST ACTIONS */
+.post-actions {
+    display: flex;
+    justify-content: space-around;
+    padding-top: 12px;
+    margin-left: 48px;
+    border-top: 1px solid #e6ecf0;
+    max-width: 425px;
+}
+
+.post-actions a,
+.post-actions button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: #71767b;
+    font-size: 14px;
+    padding: 6px 12px;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+}
+
+.post-actions a:hover,
+.post-actions button:hover {
+    background: rgba(30, 58, 138, 0.08);
+    color: #1e3a8a;
+}
+
+.like-btn {
+    color: #71767b !important;
+}
+
+.like-btn:hover {
+    background: rgba(224, 36, 94, 0.08) !important;
+    color: #e0245e !important;
+}
+
+.like-count {
+    font-weight: 600;
+}
+
+/* COMMENTS SECTION */
+.comments-section {
+    margin-top: 12px;
+    padding-left: 48px;
+    border-top: 1px solid #e6ecf0;
+    padding-top: 12px;
+    display: block;
+}
+
+.comment {
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f2f5;
+    position: relative;
+}
+
+.comment:last-child {
+    border-bottom: none;
+}
+
+.comment-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #1e3a8a;
+    font-weight: bold;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.comment-body {
+    flex: 1;
+}
+
+.comment-username {
+    font-weight: 600;
+    font-size: 14px;
+    color: #0f1419;
+}
+
+.comment-text {
+    font-size: 14px;
+    color: #0f1419;
+    line-height: 1.4;
+    margin-top: 2px;
+}
+
+.comment-delete {
+    background: none;
+    border: none;
+    color: #71767b;
+    cursor: pointer;
+    padding: 0 8px;
+    font-size: 14px;
+    transition: color 0.2s;
+}
+
+.comment-delete:hover {
+    color: #e0245e;
+}
+
+/* COMMENT INPUT */
+.comment-input {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e6ecf0;
+}
+
+.comment-input .avatar-sm {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #1e3a8a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.comment-input form {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+}
+
+.comment-input input {
+    flex: 1;
+    padding: 8px 16px;
+    border: 1px solid #e6ecf0;
+    border-radius: 30px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.comment-input input:focus {
+    border-color: #1e3a8a;
+}
+
+.comment-input button {
+    padding: 8px 16px;
+    background: #1e3a8a;
+    color: white;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 14px;
+}
+
+.comment-input button:hover {
+    background: #163172;
+}
+
+/* RIGHT SIDEBAR */
+.right-sidebar {
+    position: sticky;
+    top: 80px;
+    height: fit-content;
+}
+
+.trending-card {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e6ecf0;
+    padding: 16px;
+}
+
+.trending-item {
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f2f5;
+}
+
+.trending-item:last-child {
+    border-bottom: none;
+}
+
+.trending-category {
+    display: block;
+    color: #71767b;
+    font-size: 13px;
+}
+
+.trending-title {
+    display: block;
+    font-weight: 700;
+    color: #0f1419;
+    font-size: 15px;
+    margin: 2px 0;
+}
+
+.trending-count {
+    display: block;
+    color: #71767b;
+    font-size: 13px;
+}
+
+/* =========================
+   MENU DROPDOWN
+========================= */
+
+.menu-wrapper {
+    position: relative;
+}
+
+.menu-btn {
+    background: none;
+    border: none;
+    color: #71767b;
+    font-size: 18px;
+    padding: 4px 8px;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.menu-btn:hover {
+    background: rgba(30, 58, 138, 0.08);
+}
+
+.menu-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 30px;
+    background: white;
+    border: 1px solid #e6ecf0;
+    border-radius: 12px;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+    z-index: 100;
+    overflow: hidden;
+}
+
+.menu-dropdown.active {
+    display: block;
+}
+
+.menu-dropdown a {
+    display: block;
+    padding: 12px 16px;
+    color: #e0245e;
+    text-decoration: none;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.menu-dropdown a:hover {
+    background: #f7f9fc;
+}
+
+/* =========================
+   CONTEXT MENU
+========================= */
+
+.context-menu {
+    position: fixed;
+    display: none;
+    background: white;
+    border: 1px solid #e6ecf0;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    z-index: 9999;
+    min-width: 180px;
+    overflow: hidden;
+}
+
+.context-menu div {
+    padding: 12px 16px;
+    cursor: pointer;
+    color: #e0245e;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.context-menu div:hover {
+    background: #f7f9fc;
+}
+
+/* =========================
+   PROFILE
+========================= */
+
+.profile-card{
+    background:white;
+    max-width:700px;
+    margin:30px auto;
+    padding:30px;
+    border-radius:15px;
+    text-align:center;
+    box-shadow:0 3px 10px rgba(0,0,0,0.08);
+}
+
+.profile-name{
+    font-size:30px;
+    color:#1e3a8a;
+}
+
+.stats{
+    display:flex;
+    justify-content:center;
+    gap:50px;
+    margin:20px 0;
+}
+
+.stat-number{
+    font-size:22px;
+    font-weight:bold;
+}
+
+/* =========================
+   SEARCH
+========================= */
+
+.search-user{
+    background:white;
+    padding:20px;
+    margin-bottom:15px;
+    border-radius:10px;
+    box-shadow:0 3px 10px rgba(0,0,0,0.08);
+}
+
+/* =========================
+   RESPONSIVE
+========================= */
+
+@media (max-width: 1024px) {
+    .feed-container {
+        grid-template-columns: 1fr;
+        max-width: 600px;
+    }
+    
+    .sidebar {
+        display: none;
+    }
+    
+    .right-sidebar {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .navbar {
+        flex-direction: column;
+        text-align: center;
+        gap: 10px;
+        padding: 15px 20px;
+    }
+
+    .nav-links a {
+        margin: 0 10px;
+    }
+    
+    .auth-card {
+        width: 90%;
+        padding: 25px;
+    }
+    
+    .post-content {
+        padding-left: 0;
+    }
+    
+    .post-actions {
+        margin-left: 0;
+        max-width: 100%;
+    }
+    
+    .comments-section {
+        padding-left: 0;
+    }
+}
+/* =========================
+   CUSTOM MODAL FOR DELETE CONFIRMATION
+========================= */
+
+/* Modal overlay - covers the entire screen */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+    animation: fadeIn 0.3s ease;
+}
+
+/* Show modal when active class is added */
+.modal-overlay.active {
+    display: flex;
+}
+
+/* Modal box - the white card */
+.modal-box {
+    background: white;
+    padding: 30px;
+    border-radius: 16px;
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    animation: slideUp 0.3s ease;
+}
+
+/* Modal heading */
+.modal-box h3 {
+    font-size: 20px;
+    margin-bottom: 10px;
+    color: #1a1a2e;
+}
+
+/* Modal text */
+.modal-box p {
+    color: #71767b;
+    margin-bottom: 20px;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+/* Modal action buttons container */
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+/* Cancel button */
+.modal-actions .btn-cancel {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    background: #e6ecf0;
+    color: #0f1419;
+    transition: all 0.2s;
+}
+
+.modal-actions .btn-cancel:hover {
+    background: #d0d5d9;
+}
+
+/* Delete button */
+.modal-actions .btn-delete {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    background: #e0245e;
+    color: white;
+    transition: all 0.2s;
+}
+
+.modal-actions .btn-delete:hover {
+    background: #c01e4e;
+    transform: scale(1.02);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(30px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* =========================
+   RESPONSIVE FOR MODAL
+========================= */
+
+@media (max-width: 480px) {
+    .modal-box {
+        padding: 20px;
+        width: 95%;
+    }
+    
+    .modal-box h3 {
+        font-size: 18px;
+    }
+    
+    .modal-actions button {
+        padding: 8px 18px;
+        font-size: 13px;
+    }
+}

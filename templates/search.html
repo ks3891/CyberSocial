@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Search | NovaLink</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<!-- ================= NAVBAR ================= -->
+<div class="navbar">
+    <div class="logo">NovaLink</div>
+
+    <div class="nav-links">
+        <a href="/feed">🏠 Home</a>
+        <a href="/logout">🚪 Logout</a>
+    </div>
+</div>
+
+<!-- ================= SEARCH HEADER ================= -->
+<div style="max-width:700px; margin:20px auto; padding:0 15px;">
+
+    <div class="card" style="margin-bottom:15px;">
+
+        <h2 style="margin:0; color:#1e3a8a;">
+            Search Results
+        </h2>
+
+        <p style="color:gray; margin-top:5px;">
+            Showing results for "<b>{{ query }}</b>"
+        </p>
+
+        <!-- FACEBOOK STYLE BACK BUTTON -->
+        <a href="/feed">
+            <button style="
+                margin-top:10px;
+                background:#1877f2;
+                color:white;
+                border:none;
+                padding:8px 16px;
+                border-radius:6px;
+                cursor:pointer;
+                font-weight:500;
+            ">
+                ← Back to Feed
+            </button>
+        </a>
+
+    </div>
+
+</div>
+
+<!-- ================= RESULTS ================= -->
+<div style="max-width:700px; margin:20px auto; padding:0 15px;">
+
+    {% if users %}
+
+        {% for user in users %}
+
+        <!-- FACEBOOK STYLE USER ROW -->
+        <div class="card" style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+        ">
+
+            <!-- LEFT -->
+            <div style="display:flex; align-items:center; gap:12px;">
+
+                <div class="avatar">
+                    {{ user[1][0]|upper }}
+                </div>
+
+                <div>
+                    <a href="/profile/{{ user[1] }}" style="
+                        font-weight:600;
+                        font-size:16px;
+                        color:#050505;
+                    ">
+                        {{ user[1] }}
+                    </a>
+
+                    <div style="font-size:13px; color:#65676b;">
+                        User on NovaLink
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- RIGHT BUTTON -->
+            <a href="/profile/{{ user[1] }}">
+                <button style="
+                    background:#e4e6eb;
+                    color:#050505;
+                    border:none;
+                    padding:7px 14px;
+                    border-radius:6px;
+                    cursor:pointer;
+                    font-weight:500;
+                ">
+                    View
+                </button>
+            </a>
+
+        </div>
+
+        {% endfor %}
+
+    {% else %}
+
+        <div class="card" style="text-align:center; color:gray;">
+            No users found
+        </div>
+
+    {% endif %}
+
+</div>
+
+</body>
+</html>

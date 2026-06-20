@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - NovaLink</title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+
+        <div>
+            <div class="logo">NovaLink</div>
+            <div class="tagline">Connect • Share • Inspire</div>
+        </div>
+
+    </nav>
+
+    <!-- LOGIN BOX -->
+    <div class="auth-container">
+
+        <div class="auth-card">
+
+            <h2>Welcome Back</h2>
+
+            <form method="POST">
+
+                <input
+                    type="email"
+                    name="email"
+                    placeholder="Email"
+                    required
+                >
+
+                <input
+                    type="password"
+                    name="password"
+                    placeholder="Password"
+                    required
+                >
+
+                <button type="submit">
+                    Login
+                </button>
+
+            </form>
+
+            <p style="text-align:center; margin-top:15px;">
+                Don't have an account?
+                <a href="/signup">Create one</a>
+            </p>
+
+        </div>
+
+    </div>
+
+</body>
+</html>

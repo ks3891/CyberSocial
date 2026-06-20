@@ -1,0 +1,411 @@
+from flask import Flask, render_template, request, redirect, session
+import sqlite3
+
+app = Flask(__name__)
+app.secret_key = "cybersocial_secret_key"
+
+
+# =========================
+# HOME
+# =========================
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+
+# =========================
+# SIGNUP
+# =========================
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+
+    if request.method == "POST":
+
+        username = request.form["username"].strip()
+        email = request.form["email"].strip()
+        password = request.form["password"]
+
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+
+        # check username
+        cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+        if cursor.fetchone():
+            conn.close()
+            return "Username already exists"
+
+        # check email
+        cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+        if cursor.fetchone():
+            conn.close()
+            return "Email already exists"
+
+        # insert user
+        cursor.execute("""
+            INSERT INTO users(username, email, password)
+            VALUES (?, ?, ?)
+        """, (username, email, password))
+
+        conn.commit()
+        conn.close()
+
+        return redirect("/login")
+
+    return render_template("signup.html")
+
+
+# =========================
+# LOGIN
+# =========================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+
+    if request.method == "POST":
+
+        email = request.form["email"]
+        password = request.form["password"]
+
+        conn = sqlite3.connect("database.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM users
+            WHERE email=? AND password=?
+        """, (email, password))
+
+        user = cursor.fetchone()
+        conn.close()
+
+        if user:
+            session["user_id"] = user[0]
+            session["username"] = user[1]
+            return redirect("/feed")
+
+        return "Invalid credentials"
+
+    return render_template("login.html")
+
+
+# =========================
+# FEED
+# =========================
+@app.route("/feed")
+def feed():
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    # posts (feed)
+    cursor.execute("""
+    SELECT users.username, posts.content, posts.id,
+    (
+        SELECT COUNT(*) FROM likes WHERE post_id = posts.id
+    )
+    FROM posts
+    JOIN users ON posts.user_id = users.id
+    WHERE posts.user_id = ?
+    OR posts.user_id IN (
+        SELECT following_id FROM followers WHERE follower_id = ?
+    )
+    ORDER BY posts.id DESC
+    """, (session["user_id"], session["user_id"]))
+
+    posts = cursor.fetchall()
+
+    ## comments
+    cursor.execute("""
+    SELECT id, post_id, user_id, comment
+    FROM comments
+    ORDER BY id ASC
+    """)
+    comments = cursor.fetchall()
+    # suggested users
+    cursor.execute("""
+    SELECT id, username
+    FROM users
+    WHERE id != ?
+    AND id NOT IN (
+        SELECT following_id FROM followers WHERE follower_id = ?
+    )
+    LIMIT 5
+    """, (session["user_id"], session["user_id"]))
+
+    suggested_users = cursor.fetchall()
+
+    conn.close()
+
+    return render_template(
+        "feed.html",
+        username=session["username"],
+        posts=posts,
+        comments=comments,
+        suggested_users=suggested_users
+    )
+
+
+# =========================
+# CREATE POST
+# =========================
+@app.route("/create_post", methods=["POST"])
+def create_post():
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    content = request.form["content"]
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO posts(user_id, content)
+        VALUES (?, ?)
+    """, (session["user_id"], content))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/feed")
+
+
+# =========================
+# LIKE / UNLIKE
+# =========================
+@app.route("/like/<int:post_id>")
+def like(post_id):
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT * FROM likes
+        WHERE post_id=? AND user_id=?
+    """, (post_id, session["user_id"]))
+
+    existing = cursor.fetchone()
+
+    if not existing:
+        cursor.execute("""
+            INSERT INTO likes(post_id, user_id)
+            VALUES (?, ?)
+        """, (post_id, session["user_id"]))
+    else:
+        cursor.execute("""
+            DELETE FROM likes
+            WHERE post_id=? AND user_id=?
+        """, (post_id, session["user_id"]))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/feed")
+
+
+# =========================
+# COMMENT
+# =========================
+@app.route("/comment", methods=["POST"])
+def comment():
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    post_id = request.form["post_id"]
+    comment_text = request.form["comment"]
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO comments(post_id, user_id, comment)
+        VALUES (?, ?, ?)
+    """, (post_id, session["user_id"], comment_text))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/feed")
+
+# =========================
+# PROFILE
+# =========================
+@app.route("/profile/<username>")
+def profile(username):
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, username FROM users WHERE username=?
+    """, (username,))
+
+    user = cursor.fetchone()
+
+    if not user:
+        conn.close()
+        return "User not found"
+
+    user_id = user[0]
+
+    cursor.execute("""
+        SELECT content, id
+        FROM posts
+        WHERE user_id=?
+        ORDER BY id DESC
+    """, (user_id,))
+
+    posts = cursor.fetchall()
+
+    conn.close()
+
+    return render_template("profile.html", user=user, posts=posts)
+
+
+# =========================
+# FOLLOW / UNFOLLOW
+# =========================
+@app.route("/follow/<int:user_id>")
+def follow(user_id):
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    if session["user_id"] == user_id:
+        return redirect("/feed")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT * FROM followers
+        WHERE follower_id=? AND following_id=?
+    """, (session["user_id"], user_id))
+
+    existing = cursor.fetchone()
+
+    if not existing:
+        cursor.execute("""
+            INSERT INTO followers(follower_id, following_id)
+            VALUES (?, ?)
+        """, (session["user_id"], user_id))
+    else:
+        cursor.execute("""
+            DELETE FROM followers
+            WHERE follower_id=? AND following_id=?
+        """, (session["user_id"], user_id))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(request.referrer or "/feed")
+# =========================
+# DELETE POST
+# =========================
+@app.route("/delete_post/<int:post_id>")
+def delete_post(post_id):
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    # check post owner
+    cursor.execute("""
+        SELECT user_id FROM posts WHERE id=?
+    """, (post_id,))
+
+    post = cursor.fetchone()
+
+    if post and post[0] == session["user_id"]:
+
+        # delete related data first
+        cursor.execute("DELETE FROM comments WHERE post_id=?", (post_id,))
+        cursor.execute("DELETE FROM likes WHERE post_id=?", (post_id,))
+        cursor.execute("DELETE FROM posts WHERE id=?", (post_id,))
+
+        conn.commit()
+
+    conn.close()
+
+    return redirect("/feed")
+@app.route("/delete_comment/<int:comment_id>")
+def delete_comment(comment_id):
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        DELETE FROM comments
+        WHERE id=? AND user_id=?
+    """, (comment_id, session["user_id"]))
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/feed")
+
+
+# =========================
+# SEARCH USERS
+# =========================
+@app.route("/search")
+def search():
+
+    if "user_id" not in session:
+        return redirect("/login")
+
+    query = request.args.get("q", "")
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, username
+        FROM users
+        WHERE username LIKE ?
+    """, ('%' + query + '%',))
+
+    users = cursor.fetchall()
+    conn.close()
+
+    return render_template("search.html", users=users, query=query)
+
+
+# =========================
+# LOGOUT
+# =========================
+@app.route("/logout")
+def logout():
+
+    session.clear()
+    return redirect("/")
+
+
+# =========================
+# DEBUG
+# =========================
+@app.route("/test")
+def test():
+    return "Flask is working"
+
+
+@app.before_request
+def before_request():
+    print("➡ Request:", request.method, request.path)
+
+
+# =========================
+# RUN
+# =========================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
