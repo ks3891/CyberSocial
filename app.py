@@ -434,6 +434,31 @@ def test():
 def before_request():
     print("➡ Request:", request.method, request.path)
 
+@app.route("/db")
+def db_page():
+    import sqlite3
+
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row   # ⭐ IMPORTANT FIX
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = cursor.fetchall()
+
+    db_data = {}
+
+    for table in tables:
+        table_name = table["name"]
+
+        cursor.execute(f"SELECT * FROM {table_name} LIMIT 20")
+        rows = cursor.fetchall()
+
+        db_data[table_name] = rows
+
+    conn.close()
+
+    return render_template("db.html", db_data=db_data)
+
 
 # =========================
 # RUN
