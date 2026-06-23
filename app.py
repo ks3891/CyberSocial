@@ -1,8 +1,24 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
 
+# =========================
+# ADDED FOR CYBERBULLYING DETECTION
+# =========================
+import joblib
+
 app = Flask(__name__)
 app.secret_key = "cybersocial_secret_key"
+# =========================
+# CYBERBULLYING MODEL
+# =========================
+try:
+    model = joblib.load("cyberbullying_model.pkl")
+    vectorizer = joblib.load("vectorizer.pkl")
+    print("✅ Cyberbullying model loaded")
+except Exception as e:
+    print("❌ Model loading failed:", e)
+    model = None
+    vectorizer = None
 
 
 # =========================
@@ -152,6 +168,25 @@ def create_post():
         return redirect("/login")
 
     content = request.form["content"]
+        # =========================
+    # CYBERBULLYING DETECTION
+    # =========================
+    if model is not None and vectorizer is not None:
+
+        text_vec = vectorizer.transform([content])
+        prediction = model.predict(text_vec)[0]
+
+        print("🔍 Post Prediction:", prediction)
+
+        if str(prediction).lower() in ["toxic", "hatespeech"]:
+
+            return f"""
+            <h2>⚠️ Post Blocked</h2>
+            <p>Your post was detected as:</p>
+            <h3>{prediction}</h3>
+            <br>
+            <a href='/feed'>⬅ Go Back</a>
+            """
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
@@ -206,6 +241,9 @@ def like(post_id):
 # =========================
 # COMMENT
 # =========================
+# =========================
+# COMMENT
+# =========================
 @app.route("/comment", methods=["POST"])
 def comment():
 
@@ -214,6 +252,115 @@ def comment():
 
     post_id = request.form["post_id"]
     comment_text = request.form["comment"]
+
+    # =========================
+    # CYBERBULLYING DETECTION
+    # =========================
+    if model is not None and vectorizer is not None:
+
+        text_vec = vectorizer.transform([comment_text])
+        prediction = model.predict(text_vec)[0]
+
+        print("🔍 Comment Prediction:", prediction)
+
+        if str(prediction).lower() in ["toxic", "hatespeech"]:
+
+            return f"""
+<!DOCTYPE html>
+<html>
+<head>
+<title>Content Moderation</title>
+
+<style>
+body {{
+    margin: 0;
+    padding: 0;
+    background: linear-gradient(135deg, #1f2937, #111827);
+    font-family: Arial, sans-serif;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}}
+
+.card {{
+    background: #ffffff;
+    width: 520px;
+    padding: 35px;
+    border-radius: 16px;
+    text-align: center;
+    box-shadow: 0 12px 35px rgba(0,0,0,0.25);
+}}
+
+.icon {{
+    font-size: 55px;
+    margin-bottom: 10px;
+}}
+
+h1 {{
+    color: #111827;
+    margin-bottom: 10px;
+}}
+
+.subtext {{
+    color: #6b7280;
+    font-size: 15px;
+}}
+
+.tag {{
+    display: inline-block;
+    margin-top: 18px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    background: #f3f4f6;
+    color: #111827;
+    font-weight: bold;
+    letter-spacing: 1px;
+    
+}}
+
+
+.btn {{
+    display: inline-block;
+    margin-top: 22px;
+    padding: 12px 22px;
+    background: #4f46e5;
+    color: white;
+    text-decoration: none;
+    border-radius: 10px;
+    transition: 0.2s;
+}}
+
+.btn:hover {{
+    background: #4338ca;
+}}
+</style>
+
+</head>
+
+<body>
+
+<div class="card">
+
+    <div class="icon">🛡️</div>
+
+    <h1>Content Blocked</h1>
+
+    <p class="subtext">Our Cyberbullying Detection System detected inappropriate content.</p>
+
+    <div class="tag {'toxic' if prediction.lower() == 'toxic' else 'hate'}">
+        {prediction.upper()}
+    </div>
+
+    <br>
+
+    <a href="/feed" class="btn">Return to Feed</a>
+
+</div>
+
+</body>
+</html>
+"""
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
