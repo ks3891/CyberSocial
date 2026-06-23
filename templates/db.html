@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Database Viewer | NovaLink</title>
+    <link rel="stylesheet" href="/static/style.css">
+
+    <style>
+        body {
+            font-family: Arial;
+            padding: 20px;
+            background: #f4f6f9;
+        }
+
+        h2 {
+            color: #1e3a8a;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 40px;
+            background: white;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+
+        th {
+            background: #1e3a8a;
+            color: white;
+        }
+
+        .table-title {
+            margin-top: 30px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>📊 Database Viewer</h2>
+
+{% for table, rows in db_data.items() %}
+
+    <div class="table-title">{{ table }}</div>
+
+    <table>
+        <tr>
+            {% for col in rows[0].keys() %}
+                <th>{{ col }}</th>
+            {% endfor %}
+        </tr>
+
+        {% for row in rows %}
+        <tr>
+            {% for col in row %}
+                <td>{{ col }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+
+{% endfor %}
+
+</body>
+</html>

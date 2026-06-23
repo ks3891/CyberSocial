@@ -116,11 +116,7 @@ def feed():
     posts = cursor.fetchall()
 
     ## comments
-    cursor.execute("""
-    SELECT id, post_id, user_id, comment
-    FROM comments
-    ORDER BY id ASC
-    """)
+    cursor.execute(""" SELECT id, post_id, user_id, comment FROM comments ORDER BY id ASC """) 
     comments = cursor.fetchall()
     # suggested users
     cursor.execute("""
@@ -242,7 +238,9 @@ def profile(username):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT id, username FROM users WHERE username=?
+        SELECT id, username
+        FROM users
+        WHERE username=?
     """, (username,))
 
     user = cursor.fetchone()
@@ -253,20 +251,53 @@ def profile(username):
 
     user_id = user[0]
 
+    # User posts
     cursor.execute("""
         SELECT content, id
         FROM posts
         WHERE user_id=?
         ORDER BY id DESC
     """, (user_id,))
-
     posts = cursor.fetchall()
+
+    # Followers count
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM followers
+        WHERE following_id=?
+    """, (user_id,))
+    followers_count = cursor.fetchone()[0]
+
+    # Following count
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM followers
+        WHERE follower_id=?
+    """, (user_id,))
+    following_count = cursor.fetchone()[0]
+
+    # Is current user following this profile?
+    is_following = False
+
+    if "user_id" in session:
+        cursor.execute("""
+            SELECT *
+            FROM followers
+            WHERE follower_id=? AND following_id=?
+        """, (session["user_id"], user_id))
+
+        is_following = cursor.fetchone() is not None
 
     conn.close()
 
-    return render_template("profile.html", user=user, posts=posts)
-
-
+    return render_template(
+        "profile.html",
+        user=user,
+        posts=posts,
+        followers_count=followers_count,
+        following_count=following_count,
+        is_following=is_following
+    )
 # =========================
 # FOLLOW / UNFOLLOW
 # =========================
