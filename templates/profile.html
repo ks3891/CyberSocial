@@ -53,8 +53,7 @@
 </div>
 
 <!-- ================= POSTS (SAME AS FEED) ================= -->
-<div class="feed-main">
-
+    <div class="feed-main profile-feed">
     {% for post in posts %}
     <div class="post">
 
@@ -72,10 +71,17 @@
 
         </div>
 
-        <!-- CONTENT -->
-        <div class="post-content">
-            {{ post[0] }}
-        </div>
+       <div class="post-content">
+    {{ post[0] }}
+</div>
+
+{% if post[1] %}
+<div class="post-image">
+    <img src="{{ url_for('static', filename='uploads/' + post[1]) }}"
+         class="feed-image"
+         alt="Post Image">
+</div>
+{% endif %}
 
         <!-- ACTIONS -->
         <div class="post-actions">

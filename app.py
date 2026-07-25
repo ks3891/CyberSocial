@@ -443,11 +443,11 @@ def profile(username):
 
     # User posts
     cursor.execute("""
-        SELECT content, id
-        FROM posts
-        WHERE user_id=?
-        ORDER BY id DESC
-    """, (user_id,))
+    SELECT content, image, created_at, id
+    FROM posts
+    WHERE user_id=?
+    ORDER BY id DESC
+""", (user_id,))
     posts = cursor.fetchall()
 
     # Followers count
