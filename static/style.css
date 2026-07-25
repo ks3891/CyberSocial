@@ -239,6 +239,11 @@ body{
     align-items: flex-start;
 }
 
+.create-post-header form {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
 .create-post .avatar {
     width: 48px;
     height: 48px;
@@ -259,17 +264,22 @@ body{
 
 .create-post textarea {
     width: 100%;
-    padding: 12px 0;
-    border: none;
-    font-size: 18px;
+    min-height: 80px;
+    padding: 12px;
+    border: 1px solid #e6ecf0;
+    border-radius: 10px;
+    font-size: 16px;
     resize: none;
     outline: none;
     font-family: inherit;
-    min-height: 60px;
+    color: #333;
+    background: white;
+    display: block;
 }
 
 .create-post textarea::placeholder {
-    color: #8899aa;
+    color: #555;
+    opacity: 1;
 }
 
 .create-post-actions {
@@ -890,4 +900,11 @@ body{
         padding: 8px 18px;
         font-size: 13px;
     }
+}
+.feed-image{
+    width:100%;
+    max-height:500px;
+    object-fit:cover;
+    border-radius:10px;
+    margin-top:10px;
 }

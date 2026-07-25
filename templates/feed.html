@@ -58,12 +58,24 @@
                     {{ session['username'][0]|upper if session['username'] else '?' }}
                 </div>
 
-                <form method="POST" action="/create_post">
-                    <textarea name="content" placeholder="What's on your mind?" required></textarea>
-                    <div class="create-post-actions">
-                        <button type="submit">Post</button>
-                    </div>
-                </form>
+                <form method="POST"
+      action="/create_post"
+      enctype="multipart/form-data">
+
+<textarea 
+    name="content" 
+    placeholder="What's on your mind?"></textarea>
+
+    <input
+        type="file"
+        name="image"
+        accept="image/*">
+
+    <div class="create-post-actions">
+        <button type="submit">Post</button>
+    </div>
+
+</form>
             </div>
         </div>
 
@@ -96,9 +108,20 @@
                 </div>
             </div>
 
+           <!-- POST CAPTION -->
             {% if post[1] %}
             <div class="post-content">
                 {{ post[1] }}
+            </div>
+            {% endif %}
+
+
+            <!-- POST IMAGE -->
+            {% if post[5] %}
+            <div class="post-image">
+                <img src="{{ url_for('static', filename='uploads/' + post[5]) }}"
+                     alt="Post Image"
+                     class="feed-image">
             </div>
             {% endif %}
 

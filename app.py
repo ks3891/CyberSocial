@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, session
 import sqlite3
-
+import os
+from werkzeug.utils import secure_filename
 # =========================
 # ADDED FOR CYBERBULLYING DETECTION
 # =========================
@@ -8,6 +9,9 @@ import joblib
 
 app = Flask(__name__)
 app.secret_key = "cybersocial_secret_key"
+# Upload folder
+UPLOAD_FOLDER = "static/uploads"
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 # =========================
 # CYBERBULLYING MODEL
 # =========================
@@ -116,18 +120,26 @@ def feed():
 
     # posts (feed)
     cursor.execute("""
-    SELECT users.username, posts.content, posts.id,
+SELECT
+    users.username,
+    posts.content,
+    posts.id,
     (
-        SELECT COUNT(*) FROM likes WHERE post_id = posts.id
-    )
-    FROM posts
-    JOIN users ON posts.user_id = users.id
-    WHERE posts.user_id = ?
-    OR posts.user_id IN (
-        SELECT following_id FROM followers WHERE follower_id = ?
-    )
-    ORDER BY posts.id DESC
-    """, (session["user_id"], session["user_id"]))
+        SELECT COUNT(*) FROM likes
+        WHERE post_id = posts.id
+    ) AS likes,
+    posts.created_at,
+    posts.image
+FROM posts
+JOIN users ON posts.user_id = users.id
+WHERE posts.user_id = ?
+OR posts.user_id IN (
+    SELECT following_id
+    FROM followers
+    WHERE follower_id = ?
+)
+ORDER BY posts.id DESC
+""", (session["user_id"], session["user_id"]))
 
     posts = cursor.fetchall()
 
@@ -167,8 +179,13 @@ def create_post():
     if "user_id" not in session:
         return redirect("/login")
 
-    content = request.form["content"]
-        # =========================
+    content = request.form.get("content", "")
+    image = request.files.get("image")
+    print("CONTENT:", content)
+    print("IMAGE:", image)
+
+
+    # =========================
     # CYBERBULLYING DETECTION
     # =========================
     if model is not None and vectorizer is not None:
@@ -188,19 +205,45 @@ def create_post():
             <a href='/feed'>⬅ Go Back</a>
             """
 
+
+    # =========================
+    # IMAGE UPLOAD
+    # =========================
+    filename = None
+
+    if image and image.filename != "":
+        filename = secure_filename(image.filename)
+
+        upload_path = os.path.join(
+            app.config["UPLOAD_FOLDER"],
+            filename
+        )
+
+        image.save(upload_path)
+
+        print("✅ Image saved:", filename)
+
+
+    # =========================
+    # SAVE POST
+    # =========================
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO posts(user_id, content)
-        VALUES (?, ?)
-    """, (session["user_id"], content))
+        INSERT INTO posts(user_id, content, image)
+        VALUES (?, ?, ?)
+    """,
+    (
+        session["user_id"],
+        content,
+        filename
+    ))
 
     conn.commit()
     conn.close()
 
     return redirect("/feed")
-
 
 # =========================
 # LIKE / UNLIKE
