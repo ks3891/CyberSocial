@@ -21,6 +21,19 @@
 
     <div class="nav-links">
         <a href="/feed">🏠 Home</a>
+
+        <div class="notif-wrapper">
+            <a href="#" class="notif-bell" id="notifBellBtn" onclick="toggleNotifDropdown(event)">
+                🔔
+                <span id="notifBadge" class="notif-badge">0</span>
+            </a>
+
+            <div id="notifDropdown" class="notif-dropdown">
+                <div class="notif-dropdown-header">Notifications</div>
+                <div id="notifList"></div>
+            </div>
+        </div>
+
         <a href="/profile/{{ session['username'] }}">👤 Profile</a>
         <a href="/logout">🚪 Logout</a>
     </div>
@@ -81,7 +94,7 @@
 
         <!-- POSTS -->
         {% for post in posts %}
-        <div class="post">
+        <div class="post" id="post-{{ post[2] }}">
 
             <div class="post-header">
                 <div class="avatar">
@@ -126,58 +139,86 @@
             {% endif %}
 
             <div class="post-actions">
-                <a class="like-btn" href="/like/{{ post[2] }}">
-                    ❤️ <span class="like-count">{{ post[3] }}</span>
-                </a>
-                <button onclick="toggleComments('{{ post[2] }}')">💬 Comment</button>
+    <button
+        class="like-btn"
+        onclick="likePost({{ post[2] }}, this)">
+        ❤️ <span class="like-count">{{ post[3] }}</span>
+    </button>
+
+    <button
+        type="button"
+        class="comment-btn"
+        onclick="toggleComments('{{ post[2] }}')">
+        💬 {{ post[6] }} Comments
+    </button>
+</div>
+
+<!-- COMMENTS -->
+<div class="comments-section" id="comments-{{ post[2] }}">
+
+    {% for comment in comments %}
+        {% if comment[1] == post[2] %}
+
+        <div class="comment" data-comment-id="{{ comment[0] }}">
+
+            <div class="comment-avatar">
+                {{ comment[3][0]|upper if comment[3] else '?' }}
             </div>
 
-            <!-- COMMENTS -->
-            <div class="comments-section" id="comments-{{ post[2] }}">
-
-                {% for comment in comments %}
-                    {% if comment[1] == post[2] %}
-
-                    <div class="comment" data-comment-id="{{ comment[0] }}">
-                        <div class="comment-avatar">
-                            {{ comment[3][0]|upper if comment[3] else '?' }}
-                        </div>
-
-                        <div class="comment-body">
-                            <div class="comment-username">{{ comment[3] }}</div>
-                            <div class="comment-text">{{ comment[4] }}</div>
-                        </div>
-
-                        {% if comment[2] == session['user_id'] %}
-                        <button onclick="deleteComment('{{ comment[0] }}')" class="comment-delete">
-                            🗑
-                        </button>
-                        {% endif %}
-                    </div>
-
-                    {% endif %}
-                {% endfor %}
-
-                <!-- COMMENT INPUT -->
-                <div class="comment-input">
-                    <div class="avatar-sm">
-                        {{ session['username'][0]|upper if session['username'] else '?' }}
-                    </div>
-
-                    <form method="POST" action="/comment">
-                        <input type="hidden" name="post_id" value="{{ post[2] }}">
-                        <input type="text" name="comment" placeholder="Write a comment..." required>
-                        <button type="submit">Post</button>
-                    </form>
-                </div>
-
+            <div class="comment-body">
+                <div class="comment-username">{{ comment[3] }}</div>
+                <div class="comment-text">{{ comment[4] }}</div>
             </div>
+
+            {% if comment[2] == session['user_id'] %}
+            <button
+                type="button"
+                class="comment-delete"
+                onclick="deleteComment('{{ comment[0] }}')">
+                🗑
+            </button>
+            {% endif %}
 
         </div>
-        {% endfor %}
 
-    </div> <!-- feed-main END -->
+        {% endif %}
+    {% endfor %}
 
+    <div class="comment-input">
+
+        <div class="avatar-sm">
+            {{ session['username'][0]|upper if session['username'] else '?' }}
+        </div>
+
+        <form onsubmit="return submitComment(event, {{ post[2] }})">
+
+            <input
+                type="hidden"
+                name="post_id"
+                value="{{ post[2] }}">
+
+            <input
+                id="comment-input-{{ post[2] }}"
+                type="text"
+                name="comment"
+                placeholder="Write a comment..."
+                required>
+
+            <button type="submit">
+                Post
+            </button>
+
+        </form>
+
+    </div>
+
+</div>
+
+</div> <!-- END POST -->
+
+{% endfor %}
+
+</div> <!-- END feed-main -->
     <!-- RIGHT SIDEBAR -->
     <aside class="right-sidebar">
         <div class="trending-card">
@@ -232,6 +273,195 @@ function confirmDelete() {
         window.location.href = "/delete_comment/" + commentToDelete;
     }
 }
+function likePost(postId, button) {
+
+    fetch("/like/" + postId, {
+        headers: {
+            "X-Requested-With": "XMLHttpRequest"
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+
+        if (data.success) {
+            button.querySelector(".like-count").textContent = data.likes;
+        }
+
+    })
+    .catch(error => console.error(error));
+
+}
+function toggleComments(postId) {
+
+    let section = document.getElementById("comments-" + postId);
+
+    if (section.style.display === "block") {
+        section.style.display = "none";
+    } else {
+        section.style.display = "block";
+    }
+
+}
+function submitComment(event, postId) {
+
+    event.preventDefault();
+
+    let form = event.target;
+
+    let formData = new FormData(form);
+
+    fetch("/comment", {
+        method: "POST",
+        headers: {
+            "X-Requested-With": "XMLHttpRequest"
+        },
+        body: formData
+    })
+    .then(response => {
+
+        // If backend returns HTML (blocked comment), open it
+        const contentType = response.headers.get("content-type") || "";
+
+if (!contentType.includes("application/json")) {
+            return response.text().then(html => {
+                document.open();
+                document.write(html);
+                document.close();
+            });
+        }
+
+        return response.json();
+
+    })
+    .then(data => {
+
+        if (!data) return;
+
+        if (data.success) {
+            location.reload();
+        }
+
+    })
+    .catch(error => console.log(error));
+
+    return false;
+}
+</script>
+
+<!-- ================= NOTIFICATIONS (real-time) ================= -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+const socket = io();  // connects to this same Flask server
+
+const notifBadge = document.getElementById("notifBadge");
+const notifList = document.getElementById("notifList");
+const notifDropdown = document.getElementById("notifDropdown");
+
+// human-readable text per notification type
+function notifText(n) {
+    if (n.type === "follow") {
+        return `<b>${n.actor_username}</b> started following you`;
+    }
+    if (n.type === "like") {
+        return `<b>${n.actor_username}</b> liked your post`;
+    }
+    if (n.type === "comment") {
+        return `<b>${n.actor_username}</b> commented on your post`;
+    }
+    return `${n.actor_username} did something`;
+}
+
+function renderNotifications(notifications) {
+    notifList.innerHTML = "";
+
+    if (notifications.length === 0) {
+        notifList.innerHTML = "<div class='notif-empty'>No notifications yet</div>";
+        return;
+    }
+
+    notifications.forEach(n => {
+        const item = document.createElement("div");
+        item.className = "notif-item" + (n.is_read ? "" : " unread");
+
+        const avatarLetter = n.actor_username ? n.actor_username[0].toUpperCase() : "?";
+
+        item.innerHTML = `
+            <div class="avatar">${avatarLetter}</div>
+            <div class="notif-item-text">
+                ${notifText(n)}
+                <span class="notif-item-time">${n.created_at}</span>
+            </div>
+        `;
+
+        item.onclick = () => {
+            if (n.target_type === "post") {
+                window.location.href = "/feed#post-" + n.target_id;
+            } else if (n.target_type === "profile") {
+                window.location.href = "/profile/" + n.actor_username;
+            }
+        };
+
+        notifList.appendChild(item);
+    });
+}
+
+function refreshUnreadCount() {
+    fetch("/notifications/unread_count")
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && data.count > 0) {
+                notifBadge.style.display = "block";
+                notifBadge.textContent = data.count;
+            } else {
+                notifBadge.style.display = "none";
+            }
+        });
+}
+
+function loadNotifications() {
+    fetch("/notifications")
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                renderNotifications(data.notifications);
+            }
+        });
+}
+
+function toggleNotifDropdown(event) {
+    event.preventDefault();
+    const isOpen = notifDropdown.classList.contains("active");
+
+    if (isOpen) {
+        notifDropdown.classList.remove("active");
+    } else {
+        notifDropdown.classList.add("active");
+        loadNotifications();
+        // mark as read once the user opens the dropdown
+        fetch("/notifications/mark_read", { method: "POST" })
+            .then(() => refreshUnreadCount());
+    }
+}
+
+// close dropdown when clicking elsewhere
+window.addEventListener("click", function(e) {
+    if (!e.target.closest(".notif-wrapper")) {
+        notifDropdown.classList.remove("active");
+    }
+});
+
+// live push: new notification arrives instantly over the socket
+socket.on("new_notification", function(notification) {
+    refreshUnreadCount();
+
+    // if dropdown is currently open, prepend it live
+    if (notifDropdown.classList.contains("active")) {
+        loadNotifications();
+    }
+});
+
+// initial load on page open
+refreshUnreadCount();
 </script>
 
 <!-- MODAL -->
