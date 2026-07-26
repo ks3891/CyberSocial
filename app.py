@@ -1,17 +1,61 @@
-from flask import Flask, render_template, request, redirect, session
+from flask import Flask, jsonify, render_template, request, redirect, session
 import sqlite3
 import os
+from datetime import datetime, timezone
 from werkzeug.utils import secure_filename
 # =========================
 # ADDED FOR CYBERBULLYING DETECTION
 # =========================
 import joblib
+# =========================
+# ADDED FOR NOTIFICATIONS (real-time)
+# =========================
+from flask_socketio import SocketIO, join_room
 
 app = Flask(__name__)
 app.secret_key = "cybersocial_secret_key"
 # Upload folder
 UPLOAD_FOLDER = "static/uploads"
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+
+# =========================
+# TIME FORMATTING
+# =========================
+# SQLite's CURRENT_TIMESTAMP stores UTC time as 'YYYY-MM-DD HH:MM:SS'.
+# This converts that into a Facebook-style relative label ("Just now",
+# "5m ago", "2h ago"...), comparing against the current UTC time so the
+# result is correct regardless of the server or visitor's local timezone.
+def time_ago(timestamp_str):
+    if not timestamp_str:
+        return "Just now"
+
+    try:
+        ts = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+        ts = ts.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return timestamp_str
+
+    now = datetime.now(timezone.utc)
+    seconds = (now - ts).total_seconds()
+
+    if seconds < 0:
+        seconds = 0
+
+    if seconds < 60:
+        return "Just now"
+    elif seconds < 3600:
+        return f"{int(seconds // 60)}m ago"
+    elif seconds < 86400:
+        return f"{int(seconds // 3600)}h ago"
+    elif seconds < 604800:
+        return f"{int(seconds // 86400)}d ago"
+    else:
+        return ts.strftime("%b %d, %Y")
+
+
+# SocketIO instance used to push real-time notifications to browsers
+socketio = SocketIO(app, cors_allowed_origins="*")
 # =========================
 # CYBERBULLYING MODEL
 # =========================
@@ -23,6 +67,72 @@ except Exception as e:
     print("❌ Model loading failed:", e)
     model = None
     vectorizer = None
+
+
+# =========================
+# NOTIFICATIONS: table setup + helper
+# =========================
+def init_notifications_table():
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recipient_id INTEGER NOT NULL,
+            actor_id INTEGER NOT NULL,
+            type TEXT NOT NULL,          -- 'follow', 'like', 'comment'
+            target_type TEXT,            -- 'post', 'profile'
+            target_id INTEGER,
+            is_read INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+init_notifications_table()
+
+
+def create_notification(recipient_id, actor_id, type, target_type=None, target_id=None):
+    """Insert a notification row and push it live via Socket.IO if the
+    recipient is connected. Never notifies a user about their own action."""
+
+    if recipient_id == actor_id:
+        return
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO notifications(recipient_id, actor_id, type, target_type, target_id)
+        VALUES (?, ?, ?, ?, ?)
+    """, (recipient_id, actor_id, type, target_type, target_id))
+    conn.commit()
+
+    notif_id = cursor.lastrowid
+
+    # get actor username + this notification's timestamp for the payload
+    cursor.execute("SELECT username FROM users WHERE id=?", (actor_id,))
+    actor_row = cursor.fetchone()
+    actor_username = actor_row[0] if actor_row else "Someone"
+
+    cursor.execute("SELECT created_at FROM notifications WHERE id=?", (notif_id,))
+    created_at = cursor.fetchone()[0]
+
+    conn.close()
+
+    payload = {
+        "id": notif_id,
+        "type": type,
+        "actor_username": actor_username,
+        "target_type": target_type,
+        "target_id": target_id,
+        "created_at": time_ago(created_at),
+    }
+
+    # push instantly to the recipient if they're online (room = user id)
+    socketio.emit("new_notification", payload, room=str(recipient_id))
 
 
 # =========================
@@ -124,50 +234,83 @@ SELECT
     users.username,
     posts.content,
     posts.id,
+
+    -- Like count
     (
-        SELECT COUNT(*) FROM likes
-        WHERE post_id = posts.id
+        SELECT COUNT(*)
+        FROM likes
+        WHERE likes.post_id = posts.id
     ) AS likes,
+
     posts.created_at,
-    posts.image
+    posts.image,
+
+    -- Comment count
+    (
+        SELECT COUNT(*)
+        FROM comments
+        WHERE comments.post_id = posts.id
+    ) AS comment_count
+
 FROM posts
-JOIN users ON posts.user_id = users.id
+JOIN users
+ON posts.user_id = users.id
+
 WHERE posts.user_id = ?
 OR posts.user_id IN (
     SELECT following_id
     FROM followers
     WHERE follower_id = ?
 )
+
 ORDER BY posts.id DESC
 """, (session["user_id"], session["user_id"]))
 
     posts = cursor.fetchall()
+    posts = [list(p) for p in posts]
+    for p in posts:
+        p[4] = time_ago(p[4])
+    print(posts)
 
-    ## comments
-    cursor.execute(""" SELECT id, post_id, user_id, comment FROM comments ORDER BY id ASC """) 
-    comments = cursor.fetchall()
-    # suggested users
+# Comments with username
     cursor.execute("""
-    SELECT id, username
-    FROM users
-    WHERE id != ?
-    AND id NOT IN (
-        SELECT following_id FROM followers WHERE follower_id = ?
-    )
-    LIMIT 5
-    """, (session["user_id"], session["user_id"]))
+SELECT
+    comments.id,
+    comments.post_id,
+    comments.user_id,
+    users.username,
+    comments.comment,
+    comments.created_at
+FROM comments
+JOIN users
+ON comments.user_id = users.id
+ORDER BY comments.id ASC
+""")
+
+    comments = cursor.fetchall()
+
+# suggested users
+    cursor.execute("""
+SELECT id, username
+FROM users
+WHERE id != ?
+AND id NOT IN (
+    SELECT following_id FROM followers WHERE follower_id = ?
+)
+LIMIT 5
+""", (session["user_id"], session["user_id"]))
 
     suggested_users = cursor.fetchall()
 
     conn.close()
 
     return render_template(
-        "feed.html",
-        username=session["username"],
-        posts=posts,
-        comments=comments,
-        suggested_users=suggested_users
-    )
+    "feed.html",
+    username=session["username"],
+    posts=posts,
+    comments=comments,
+    suggested_users=suggested_users
+)
 
 
 # =========================
@@ -252,49 +395,97 @@ def create_post():
 def like(post_id):
 
     if "user_id" not in session:
-        return redirect("/login")
+        return jsonify({"success": False}), 401
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT * FROM likes
+        SELECT *
+        FROM likes
         WHERE post_id=? AND user_id=?
     """, (post_id, session["user_id"]))
 
     existing = cursor.fetchone()
 
-    if not existing:
-        cursor.execute("""
-            INSERT INTO likes(post_id, user_id)
-            VALUES (?, ?)
-        """, (post_id, session["user_id"]))
-    else:
+    if existing:
         cursor.execute("""
             DELETE FROM likes
             WHERE post_id=? AND user_id=?
         """, (post_id, session["user_id"]))
+    else:
+        cursor.execute("""
+            INSERT INTO likes(post_id, user_id)
+            VALUES (?, ?)
+        """, (post_id, session["user_id"]))
 
     conn.commit()
+
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM likes
+        WHERE post_id=?
+    """, (post_id,))
+
+    likes = cursor.fetchone()[0]
+
+    # only notify on a fresh like, not on unlike
+    notify_recipient = None
+    if not existing:
+        cursor.execute("SELECT user_id FROM posts WHERE id=?", (post_id,))
+        post_owner_row = cursor.fetchone()
+        if post_owner_row:
+            notify_recipient = post_owner_row[0]
+
     conn.close()
 
-    return redirect("/feed")
+    # create_notification opens its own connection, so it must run
+    # only after the connection above is fully closed
+    if notify_recipient is not None:
+        create_notification(
+            recipient_id=notify_recipient,
+            actor_id=session["user_id"],
+            type="like",
+            target_type="post",
+            target_id=post_id,
+        )
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+       return jsonify({
+            "success": True,
+            "likes": likes
+        })
+
+    return redirect(request.referrer or "/feed")
 
 
-# =========================
-# COMMENT
-# =========================
+
 # =========================
 # COMMENT
 # =========================
 @app.route("/comment", methods=["POST"])
+
 def comment():
 
+    print("===== COMMENT ROUTE HIT =====")
+
+    print(request.form)
+
+
+
     if "user_id" not in session:
+
         return redirect("/login")
 
+
+
     post_id = request.form["post_id"]
+
     comment_text = request.form["comment"]
+
+    print(post_id)
+
+    print(comment_text)
 
     # =========================
     # CYBERBULLYING DETECTION
@@ -414,9 +605,43 @@ h1 {{
     """, (post_id, session["user_id"], comment_text))
 
     conn.commit()
+
+# Get updated comment count
+    cursor.execute("""
+SELECT COUNT(*)
+FROM comments
+WHERE post_id = ?
+""", (post_id,))
+
+    comment_count = cursor.fetchone()[0]
+
+    # notify the post owner about the new comment
+    cursor.execute("SELECT user_id FROM posts WHERE id=?", (post_id,))
+    post_owner_row = cursor.fetchone()
+    notify_recipient = post_owner_row[0] if post_owner_row else None
+
     conn.close()
 
-    return redirect("/feed")
+    # create_notification opens its own connection, so it must run
+    # only after the connection above is fully closed
+    if notify_recipient is not None:
+        create_notification(
+            recipient_id=notify_recipient,
+            actor_id=session["user_id"],
+            type="comment",
+            target_type="post",
+            target_id=post_id,
+        )
+
+# AJAX request
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+     return jsonify({
+        "success": True,
+            "comments": comment_count
+    })
+
+# Normal request
+    return redirect(request.referrer or "/feed")
 
 # =========================
 # PROFILE
@@ -424,66 +649,157 @@ h1 {{
 @app.route("/profile/<username>")
 def profile(username):
 
+    # Login check
+    if "user_id" not in session:
+        return redirect("/login")
+
+
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
+
+    # Get profile user
     cursor.execute("""
-        SELECT id, username
+        SELECT 
+            id,
+            username,
+            email,
+            bio,
+            profile_image,
+            cover_image,
+            location,
+            website
         FROM users
         WHERE username=?
     """, (username,))
 
-    user = cursor.fetchone()
 
-    if not user:
+    profile_user = cursor.fetchone()
+
+
+
+    if not profile_user:
         conn.close()
         return "User not found"
 
-    user_id = user[0]
 
-    # User posts
-    cursor.execute("""
-    SELECT content, image, created_at, id
-    FROM posts
-    WHERE user_id=?
-    ORDER BY id DESC
-""", (user_id,))
-    posts = cursor.fetchall()
+
+    profile_id = profile_user[0]
+
+
 
     # Followers count
+
     cursor.execute("""
         SELECT COUNT(*)
         FROM followers
         WHERE following_id=?
-    """, (user_id,))
+    """, (profile_id,))
+
+
     followers_count = cursor.fetchone()[0]
 
+
+
     # Following count
+
     cursor.execute("""
         SELECT COUNT(*)
         FROM followers
         WHERE follower_id=?
-    """, (user_id,))
+    """, (profile_id,))
+
+
     following_count = cursor.fetchone()[0]
 
-    # Is current user following this profile?
-    is_following = False
 
-    if "user_id" in session:
-        cursor.execute("""
-            SELECT *
-            FROM followers
-            WHERE follower_id=? AND following_id=?
-        """, (session["user_id"], user_id))
 
-        is_following = cursor.fetchone() is not None
+    # Check if current user follows this user
+
+    cursor.execute("""
+        SELECT id
+        FROM followers
+        WHERE follower_id=?
+        AND following_id=?
+    """,
+    (
+        session["user_id"],
+        profile_id
+    ))
+
+
+    is_following = cursor.fetchone() is not None
+
+
+
+
+
+    # User posts (now also includes comment_count, like the feed)
+
+    cursor.execute("""
+        SELECT
+            posts.id,
+            posts.content,
+            posts.created_at,
+            COUNT(likes.id) AS likes,
+            posts.image,
+            (
+                SELECT COUNT(*)
+                FROM comments
+                WHERE comments.post_id = posts.id
+            ) AS comment_count
+        FROM posts
+
+        LEFT JOIN likes
+        ON posts.id = likes.post_id
+
+        WHERE posts.user_id=?
+
+        GROUP BY posts.id
+
+        ORDER BY posts.created_at DESC
+
+    """,
+    (profile_id,))
+
+
+    posts = cursor.fetchall()
+    posts = [list(p) for p in posts]
+    for p in posts:
+        p[2] = time_ago(p[2])
+
+
+    # Comments for this profile's posts (same shape as feed's comments)
+
+    cursor.execute("""
+        SELECT
+            comments.id,
+            comments.post_id,
+            comments.user_id,
+            users.username,
+            comments.comment,
+            comments.created_at
+        FROM comments
+        JOIN users
+        ON comments.user_id = users.id
+        WHERE comments.post_id IN (
+            SELECT id FROM posts WHERE user_id=?
+        )
+        ORDER BY comments.id ASC
+    """, (profile_id,))
+
+    comments = cursor.fetchall()
+
 
     conn.close()
 
+
+
     return render_template(
         "profile.html",
-        user=user,
+        profile_user=profile_user,
         posts=posts,
+        comments=comments,
         followers_count=followers_count,
         following_count=following_count,
         is_following=is_following
@@ -515,14 +831,25 @@ def follow(user_id):
             INSERT INTO followers(follower_id, following_id)
             VALUES (?, ?)
         """, (session["user_id"], user_id))
+        conn.commit()
+        conn.close()
+
+        # notify the user being followed (opens its own connection,
+        # so the one above must be committed and closed first)
+        create_notification(
+            recipient_id=user_id,
+            actor_id=session["user_id"],
+            type="follow",
+            target_type="profile",
+            target_id=session["user_id"],
+        )
     else:
         cursor.execute("""
             DELETE FROM followers
             WHERE follower_id=? AND following_id=?
         """, (session["user_id"], user_id))
-
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
 
     return redirect(request.referrer or "/feed")
 # =========================
@@ -651,7 +978,93 @@ def db_page():
 
 
 # =========================
+# NOTIFICATIONS: routes + socket events
+# =========================
+@socketio.on("connect")
+def handle_connect():
+    if "user_id" in session:
+        join_room(str(session["user_id"]))
+
+
+@app.route("/notifications")
+def get_notifications():
+    if "user_id" not in session:
+        return jsonify({"success": False}), 401
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            notifications.id,
+            notifications.type,
+            notifications.target_type,
+            notifications.target_id,
+            notifications.is_read,
+            notifications.created_at,
+            users.username
+        FROM notifications
+        JOIN users ON users.id = notifications.actor_id
+        WHERE notifications.recipient_id = ?
+        ORDER BY notifications.created_at DESC
+        LIMIT 30
+    """, (session["user_id"],))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    notifications = []
+    for row in rows:
+        notifications.append({
+            "id": row[0],
+            "type": row[1],
+            "target_type": row[2],
+            "target_id": row[3],
+            "is_read": bool(row[4]),
+            "created_at": time_ago(row[5]),
+            "actor_username": row[6],
+        })
+
+    return jsonify({"success": True, "notifications": notifications})
+
+
+@app.route("/notifications/unread_count")
+def unread_count():
+    if "user_id" not in session:
+        return jsonify({"success": False}), 401
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*) FROM notifications
+        WHERE recipient_id=? AND is_read=0
+    """, (session["user_id"],))
+    count = cursor.fetchone()[0]
+    conn.close()
+
+    return jsonify({"success": True, "count": count})
+
+
+@app.route("/notifications/mark_read", methods=["POST"])
+def mark_read():
+    if "user_id" not in session:
+        return jsonify({"success": False}), 401
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE notifications SET is_read=1
+        WHERE recipient_id=?
+    """, (session["user_id"],))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"success": True})
+
+
+# =========================
 # RUN
 # =========================
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
