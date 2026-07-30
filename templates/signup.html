@@ -25,7 +25,7 @@
 
             <h2>Create Account</h2>
 
-            <form method="POST">
+            <form method="POST" id="signupForm">
 
                 <input
                     type="text"
@@ -48,6 +48,31 @@
                     required
                 >
 
+                <label class="field-label" for="date_of_birth">Date of birth</label>
+                <input
+                    type="date"
+                    name="date_of_birth"
+                    id="date_of_birth"
+                    required
+                    onchange="checkAge()"
+                >
+
+                <!-- Only shown/required if the user is under 18 -->
+                <div id="parentEmailWrapper" style="display:none;">
+                    <p class="minor-note">
+                        Since you're under 18, we need a parent or guardian's email
+                        to activate your account. They'll get a confirmation link,
+                        and we'll notify them if any of your posts or comments get
+                        blocked by our safety filters.
+                    </p>
+                    <input
+                        type="email"
+                        name="parent_email"
+                        id="parent_email"
+                        placeholder="Parent/Guardian Email"
+                    >
+                </div>
+
                 <button type="submit">
                     Sign Up
                 </button>
@@ -62,6 +87,33 @@
         </div>
 
     </div>
+
+    <script>
+        function checkAge() {
+            const dobInput = document.getElementById("date_of_birth");
+            const wrapper = document.getElementById("parentEmailWrapper");
+            const parentEmailField = document.getElementById("parent_email");
+
+            if (!dobInput.value) return;
+
+            const dob = new Date(dobInput.value);
+            const today = new Date();
+
+            let age = today.getFullYear() - dob.getFullYear();
+            const monthDiff = today.getMonth() - dob.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+                age--;
+            }
+
+            if (age < 18) {
+                wrapper.style.display = "block";
+                parentEmailField.setAttribute("required", "required");
+            } else {
+                wrapper.style.display = "none";
+                parentEmailField.removeAttribute("required");
+            }
+        }
+    </script>
 
 </body>
 </html>

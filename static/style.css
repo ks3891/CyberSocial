@@ -1236,3 +1236,26 @@ body{
 .like-btn-solid:hover{
     background:#0d5dcc;
 }
+/* =========================
+   ADDED: MINOR SAFETY SIGNUP FIELDS
+   Append this to the bottom of your existing style.css
+========================= */
+
+.field-label {
+    display: block;
+    font-size: 13px;
+    color: #71767b;
+    margin-bottom: 6px;
+    margin-top: -6px;
+}
+
+.minor-note {
+    font-size: 13px;
+    color: #71767b;
+    background: #f0f4ff;
+    border: 1px solid #dce6ff;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}

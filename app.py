@@ -1,7 +1,13 @@
+from dotenv import load_dotenv
+load_dotenv()  # loads SMTP_HOST, SMTP_USER, SMTP_PASS, etc. from a .env file automatically
+
 from flask import Flask, jsonify, render_template, request, redirect, session
 import sqlite3
 import os
-from datetime import datetime, timezone
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime, timezone, date
 from werkzeug.utils import secure_filename
 # =========================
 # ADDED FOR CYBERBULLYING DETECTION
@@ -17,6 +23,44 @@ app.secret_key = "cybersocial_secret_key"
 # Upload folder
 UPLOAD_FOLDER = "static/uploads"
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+MINOR_AGE_CUTOFF = 18
+
+# =========================
+# ADDED FOR PARENT NOTIFICATIONS (email)
+# Set these as real environment variables in production.
+# If SMTP isn't configured, emails are printed to the console instead
+# of failing, so local development still works.
+# =========================
+SMTP_HOST = os.environ.get("SMTP_HOST")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER = os.environ.get("SMTP_USER")
+SMTP_PASS = os.environ.get("SMTP_PASS")
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "no-reply@novalink.local")
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:5000")
+
+
+def send_email(to_email, subject, body_html):
+    """Sends a real email if SMTP env vars are set, otherwise just logs
+    it to the console so local dev doesn't need a mail server."""
+
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
+        print("=" * 60)
+        print(f"[DEV MODE] Would send email to: {to_email}")
+        print(f"Subject: {subject}")
+        print(body_html)
+        print("=" * 60)
+        return
+
+    msg = MIMEText(body_html, "html")
+    msg["Subject"] = subject
+    msg["From"] = FROM_EMAIL
+    msg["To"] = to_email
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(FROM_EMAIL, [to_email], msg.as_string())
 
 
 # =========================
@@ -52,6 +96,13 @@ def time_ago(timestamp_str):
         return f"{int(seconds // 86400)}d ago"
     else:
         return ts.strftime("%b %d, %Y")
+
+
+def calculate_age(dob_str):
+    """dob_str is 'YYYY-MM-DD' from an HTML date input."""
+    dob = datetime.strptime(dob_str, "%Y-%m-%d").date()
+    today = date.today()
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
 # SocketIO instance used to push real-time notifications to browsers
@@ -92,6 +143,134 @@ def init_notifications_table():
 
 
 init_notifications_table()
+
+
+# =========================
+# ADDED: MINOR SAFETY TABLES
+# Adds new columns to `users` (only if missing, so this is safe to run
+# every time the app starts) plus two new tables: one for parent email
+# verification tokens, one to log every flagged post/comment from a
+# minor so parents can be notified and a history can be shown later.
+# =========================
+def init_minor_safety_tables():
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("PRAGMA table_info(users)")
+    existing_columns = [row[1] for row in cursor.fetchall()]
+
+    if "date_of_birth" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN date_of_birth TEXT")
+
+    if "parent_email" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN parent_email TEXT")
+
+    if "is_minor" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_minor INTEGER DEFAULT 0")
+
+    if "account_status" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN account_status TEXT DEFAULT 'active'")
+
+    if "parent_consent_status" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN parent_consent_status TEXT DEFAULT 'not_required'")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS parent_verification_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            parent_email TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS moderation_flags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            content_type TEXT NOT NULL,   -- 'post' | 'comment'
+            category TEXT NOT NULL,       -- classifier's prediction label
+            flagged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            parent_notified_at TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_minor_safety_tables()
+
+
+def send_parent_verification_email(parent_email, token, child_username):
+    verify_url = f"{BASE_URL}/verify-parent/{token}"
+    body = f"""
+        <p>Hello,</p>
+        <p>The account <strong>{child_username}</strong> on NovaLink has listed you
+        as their parent/guardian.</p>
+        <p>To activate the account and enable safety notifications for this child's
+        activity, please confirm by clicking below:</p>
+        <p><a href="{verify_url}">Confirm and activate account</a></p>
+        <p>This link expires in 48 hours. If you did not expect this email, you can
+        ignore it and the account will remain inactive.</p>
+    """
+    send_email(parent_email, "Please confirm your child's NovaLink account", body)
+
+
+def notify_parent_of_flagged_content(user_id, content_type, category):
+    """Called whenever the cyberbullying model blocks a post/comment from a
+    user who is a registered minor. Logs the flag and emails the parent
+    immediately every time (Option B: no suppression window — every
+    flagged attempt sends an email, useful for demo/testing so every
+    blocked action is visibly confirmed)."""
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT username, parent_email, is_minor
+        FROM users WHERE id=?
+    """, (user_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return
+
+    username, parent_email, is_minor = row
+
+    if not is_minor or not parent_email:
+        conn.close()
+        return
+
+    cursor.execute("""
+        INSERT INTO moderation_flags(user_id, content_type, category)
+        VALUES (?, ?, ?)
+    """, (user_id, content_type, category))
+    conn.commit()
+    flag_id = cursor.lastrowid
+
+    body = f"""
+        <p>Hello,</p>
+        <p>We wanted to let you know that a {content_type} your child
+        (<strong>{username}</strong>) attempted to post on NovaLink was
+        automatically blocked by our content moderation system.</p>
+        <p><strong>Reason:</strong> flagged as {category}</p>
+        <p>The content was not published. This is an automated notification —
+        no action is required, but you may want to check in with your child.</p>
+    """
+    send_email(parent_email, "Safety alert: flagged activity on your child's NovaLink account", body)
+
+    cursor.execute("""
+        UPDATE moderation_flags SET parent_notified_at = CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (flag_id,))
+    conn.commit()
+    conn.close()
 
 
 def create_notification(recipient_id, actor_id, type, target_type=None, target_id=None):
@@ -154,6 +333,24 @@ def signup():
         username = request.form["username"].strip()
         email = request.form["email"].strip()
         password = request.form["password"]
+        date_of_birth = request.form.get("date_of_birth", "").strip()
+        parent_email = request.form.get("parent_email", "").strip()
+
+        if not date_of_birth:
+            return "Date of birth is required"
+
+        try:
+            age = calculate_age(date_of_birth)
+        except ValueError:
+            return "Invalid date of birth"
+
+        is_minor = age < MINOR_AGE_CUTOFF
+
+        if is_minor and not parent_email:
+            return "A parent/guardian email is required for users under 18"
+
+        if is_minor and parent_email.lower() == email.lower():
+            return "Parent/guardian email must be different from your account email"
 
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
@@ -170,18 +367,94 @@ def signup():
             conn.close()
             return "Email already exists"
 
+        account_status = "pending_consent" if is_minor else "active"
+        parent_consent_status = "pending" if is_minor else "not_required"
+
         # insert user
         cursor.execute("""
-            INSERT INTO users(username, email, password)
-            VALUES (?, ?, ?)
-        """, (username, email, password))
+            INSERT INTO users(
+                username, email, password,
+                date_of_birth, parent_email, is_minor,
+                account_status, parent_consent_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            username, email, password,
+            date_of_birth, parent_email if is_minor else None, int(is_minor),
+            account_status, parent_consent_status
+        ))
 
         conn.commit()
-        conn.close()
+        user_id = cursor.lastrowid
 
+        if is_minor:
+            token = secrets.token_hex(32)
+            # token is valid for 48 hours
+            from datetime import timedelta
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+
+            cursor.execute("""
+                INSERT INTO parent_verification_tokens(user_id, token, parent_email, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, token, parent_email, expires_at))
+            conn.commit()
+            conn.close()
+
+            send_parent_verification_email(parent_email, token, username)
+
+            return """
+                <h2>Account created!</h2>
+                <p>Since you're under 18, we sent an email to your parent/guardian.
+                Your account will be activated once they confirm.</p>
+                <a href="/login">Go to login</a>
+            """
+
+        conn.close()
         return redirect("/login")
 
     return render_template("signup.html")
+
+
+# =========================
+# VERIFY PARENT (ADDED)
+# =========================
+@app.route("/verify-parent/<token>")
+def verify_parent(token):
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT * FROM parent_verification_tokens
+        WHERE token=? AND used_at IS NULL
+    """, (token,))
+    record = cursor.fetchone()
+
+    if not record:
+        conn.close()
+        return "This verification link is invalid or has already been used."
+
+    # columns: id, user_id, token, parent_email, expires_at, used_at, created_at
+    record_id, user_id, _, _, expires_at, _, _ = record
+
+    if datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S") < datetime.utcnow():
+        conn.close()
+        return "This verification link has expired. Please ask your child to sign up again."
+
+    cursor.execute("""
+        UPDATE users SET account_status='active', parent_consent_status='verified'
+        WHERE id=?
+    """, (user_id,))
+
+    cursor.execute("""
+        UPDATE parent_verification_tokens SET used_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (record_id,))
+
+    conn.commit()
+    conn.close()
+
+    return "Thank you! The account has been verified and activated. <a href='/login'>Go to login</a>"
 
 
 # =========================
@@ -207,6 +480,22 @@ def login():
         conn.close()
 
         if user:
+            # ADDED: block login while a minor's account is awaiting
+            # parent verification. account_status is column index 9
+            # given the current INSERT order (id, username, email,
+            # password, ...older columns..., date_of_birth, parent_email,
+            # is_minor, account_status, parent_consent_status) — safest
+            # to look it up by name instead of trusting index position.
+            cursor2_conn = sqlite3.connect("database.db")
+            cursor2_conn.row_factory = sqlite3.Row
+            cursor2 = cursor2_conn.cursor()
+            cursor2.execute("SELECT account_status FROM users WHERE id=?", (user[0],))
+            status_row = cursor2.fetchone()
+            cursor2_conn.close()
+
+            if status_row and status_row["account_status"] == "pending_consent":
+                return "This account is awaiting parent/guardian verification. Ask them to check their email."
+
             session["user_id"] = user[0]
             session["username"] = user[1]
             return redirect("/feed")
@@ -339,6 +628,13 @@ def create_post():
         print("🔍 Post Prediction:", prediction)
 
         if str(prediction).lower() in ["toxic", "hatespeech"]:
+
+            # ADDED: notify parent if this account belongs to a minor
+            notify_parent_of_flagged_content(
+                user_id=session["user_id"],
+                content_type="post",
+                category=str(prediction)
+            )
 
             return f"""
             <h2>⚠️ Post Blocked</h2>
@@ -498,6 +794,13 @@ def comment():
         print("🔍 Comment Prediction:", prediction)
 
         if str(prediction).lower() in ["toxic", "hatespeech"]:
+
+            # ADDED: notify parent if this account belongs to a minor
+            notify_parent_of_flagged_content(
+                user_id=session["user_id"],
+                content_type="comment",
+                category=str(prediction)
+            )
 
             return f"""
 <!DOCTYPE html>
