@@ -1,13 +1,14 @@
 from dotenv import load_dotenv
-load_dotenv()  # loads SMTP_HOST, SMTP_USER, SMTP_PASS, etc. from a .env file automatically
+load_dotenv()  # loads SMTP_HOST, SMTP_USER, SMTP_PASS, DATABASE_URL, etc. from a .env file automatically
 
 from flask import Flask, jsonify, render_template, request, redirect, session
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import os
 import secrets
 import smtplib
 from email.mime.text import MIMEText
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from werkzeug.utils import secure_filename
 # =========================
 # ADDED FOR CYBERBULLYING DETECTION
@@ -28,16 +29,42 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 MINOR_AGE_CUTOFF = 18
 
 # =========================
+# DATABASE (PostgreSQL)
+# =========================
+# DATABASE_URL comes from your .env locally, and from Render's Postgres
+# "Internal Database URL" once deployed (Render injects it automatically
+# if you link the database to the web service in the dashboard, or set
+# it as an env var yourself).
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is not set. Add it to your .env file locally, "
+        "or as an environment variable on Render."
+    )
+
+
+def get_conn():
+    """Every route opens its own short-lived connection, same pattern as
+    the original sqlite3 code — just pointed at Postgres now."""
+    return psycopg2.connect(DATABASE_URL)
+
+
+# =========================
 # ADDED FOR PARENT NOTIFICATIONS (email)
-# Set these as real environment variables in production.
-# If SMTP isn't configured, emails are printed to the console instead
-# of failing, so local development still works.
+# Set these as real environment variables in production (Render dashboard
+# -> your service -> Environment). If SMTP isn't configured, emails are
+# printed to the console instead of failing, so local dev without a mail
+# server still works.
 # =========================
 SMTP_HOST = os.environ.get("SMTP_HOST")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "no-reply@novalink.local")
+# IMPORTANT: once deployed, set this to your real Render URL, e.g.
+# https://novalink.onrender.com — this is what fixes the parent
+# verification links not opening off your home wifi.
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:5000")
 
 
@@ -67,19 +94,23 @@ def send_email(to_email, subject, body_html):
 # =========================
 # TIME FORMATTING
 # =========================
-# SQLite's CURRENT_TIMESTAMP stores UTC time as 'YYYY-MM-DD HH:MM:SS'.
-# This converts that into a Facebook-style relative label ("Just now",
-# "5m ago", "2h ago"...), comparing against the current UTC time so the
-# result is correct regardless of the server or visitor's local timezone.
-def time_ago(timestamp_str):
-    if not timestamp_str:
+# Postgres TIMESTAMP columns come back from psycopg2 as real Python
+# datetime objects (not strings like sqlite3 gave us), so this accepts
+# either a datetime or a string, for safety.
+def time_ago(timestamp):
+    if not timestamp:
         return "Just now"
 
-    try:
-        ts = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+    if isinstance(timestamp, str):
+        try:
+            ts = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return timestamp
+    else:
+        ts = timestamp
+
+    if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return timestamp_str
 
     now = datetime.now(timezone.utc)
     seconds = (now - ts).total_seconds()
@@ -106,13 +137,13 @@ def calculate_age(dob_str):
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
-# SocketIO instance used to push real-time notifications to browsers
-socketio = SocketIO(app, cors_allowed_origins="*")
+# SocketIO instance used to push real-time notifications to browsers.
+# async_mode="threading" avoids needing eventlet/gevent as an extra
+# dependency — fine for a project of this size and simplest to deploy.
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
 # =========================
-# CYBERBULLYING MODEL
-# =========================
-# =========================
-# CYBERBULLYING MODEL
+# CYBERBULLYING MODEL (word + char vectorizers)
 # =========================
 try:
     model = joblib.load("cyberbullying_model.pkl")
@@ -130,15 +161,91 @@ except Exception as e:
     char_vectorizer = None
 
 
+def classify_text(text):
+    """Runs the word+char vectorizer pipeline and returns the model's
+    prediction, or None if the model isn't loaded."""
+    if model is None or word_vectorizer is None or char_vectorizer is None:
+        return None
+
+    word_vec = word_vectorizer.transform([text])
+    char_vec = char_vectorizer.transform([text])
+    text_vec = hstack([word_vec, char_vec])
+
+    return model.predict(text_vec)[0]
+
+
 # =========================
-# NOTIFICATIONS: table setup + helper
+# DATABASE SETUP (runs automatically on every startup — this is what
+# makes a fresh Render deployment self-provision with zero manual
+# scripts. Every statement is safe to re-run.)
 # =========================
+def init_base_tables():
+    conn = get_conn()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            bio TEXT,
+            profile_image TEXT,
+            cover_image TEXT,
+            location TEXT,
+            website TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS posts (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            content TEXT,
+            image TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id SERIAL PRIMARY KEY,
+            post_id INTEGER NOT NULL REFERENCES posts(id),
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            comment TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS likes (
+            id SERIAL PRIMARY KEY,
+            post_id INTEGER NOT NULL REFERENCES posts(id),
+            user_id INTEGER NOT NULL REFERENCES users(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS followers (
+            id SERIAL PRIMARY KEY,
+            follower_id INTEGER NOT NULL REFERENCES users(id),
+            following_id INTEGER NOT NULL REFERENCES users(id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_base_tables()
+
+
 def init_notifications_table():
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             recipient_id INTEGER NOT NULL,
             actor_id INTEGER NOT NULL,
             type TEXT NOT NULL,          -- 'follow', 'like', 'comment'
@@ -157,36 +264,25 @@ init_notifications_table()
 
 # =========================
 # ADDED: MINOR SAFETY TABLES
-# Adds new columns to `users` (only if missing, so this is safe to run
-# every time the app starts) plus two new tables: one for parent email
-# verification tokens, one to log every flagged post/comment from a
-# minor so parents can be notified and a history can be shown later.
+# Postgres supports "IF NOT EXISTS" on ADD COLUMN directly, so this is
+# safe to run every time the app starts without checking existing
+# columns first, plus two new tables: one for parent email verification
+# tokens, one to log every flagged post/comment from a minor so parents
+# can be notified and a history can be shown later.
 # =========================
 def init_minor_safety_tables():
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
-    cursor.execute("PRAGMA table_info(users)")
-    existing_columns = [row[1] for row in cursor.fetchall()]
-
-    if "date_of_birth" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN date_of_birth TEXT")
-
-    if "parent_email" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN parent_email TEXT")
-
-    if "is_minor" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN is_minor INTEGER DEFAULT 0")
-
-    if "account_status" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN account_status TEXT DEFAULT 'active'")
-
-    if "parent_consent_status" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN parent_consent_status TEXT DEFAULT 'not_required'")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_email TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_minor INTEGER DEFAULT 0")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status TEXT DEFAULT 'active'")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS parent_consent_status TEXT DEFAULT 'not_required'")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS parent_verification_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
             token TEXT NOT NULL UNIQUE,
             parent_email TEXT NOT NULL,
@@ -199,7 +295,7 @@ def init_minor_safety_tables():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS moderation_flags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL,
             content_type TEXT NOT NULL,   -- 'post' | 'comment'
             category TEXT NOT NULL,       -- classifier's prediction label
@@ -234,16 +330,16 @@ def send_parent_verification_email(parent_email, token, child_username):
 def notify_parent_of_flagged_content(user_id, content_type, category):
     """Called whenever the cyberbullying model blocks a post/comment from a
     user who is a registered minor. Logs the flag and emails the parent
-    immediately every time (Option B: no suppression window — every
-    flagged attempt sends an email, useful for demo/testing so every
-    blocked action is visibly confirmed)."""
+    immediately every time (no suppression window — every flagged attempt
+    sends an email, useful for demo/testing so every blocked action is
+    visibly confirmed)."""
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT username, parent_email, is_minor
-        FROM users WHERE id=?
+        FROM users WHERE id=%s
     """, (user_id,))
     row = cursor.fetchone()
 
@@ -259,10 +355,11 @@ def notify_parent_of_flagged_content(user_id, content_type, category):
 
     cursor.execute("""
         INSERT INTO moderation_flags(user_id, content_type, category)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
+        RETURNING id
     """, (user_id, content_type, category))
+    flag_id = cursor.fetchone()[0]
     conn.commit()
-    flag_id = cursor.lastrowid
 
     body = f"""
         <p>Hello,</p>
@@ -277,7 +374,7 @@ def notify_parent_of_flagged_content(user_id, content_type, category):
 
     cursor.execute("""
         UPDATE moderation_flags SET parent_notified_at = CURRENT_TIMESTAMP
-        WHERE id=?
+        WHERE id=%s
     """, (flag_id,))
     conn.commit()
     conn.close()
@@ -290,23 +387,23 @@ def create_notification(recipient_id, actor_id, type, target_type=None, target_i
     if recipient_id == actor_id:
         return
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         INSERT INTO notifications(recipient_id, actor_id, type, target_type, target_id)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
     """, (recipient_id, actor_id, type, target_type, target_id))
+    notif_id = cursor.fetchone()[0]
     conn.commit()
 
-    notif_id = cursor.lastrowid
-
     # get actor username + this notification's timestamp for the payload
-    cursor.execute("SELECT username FROM users WHERE id=?", (actor_id,))
+    cursor.execute("SELECT username FROM users WHERE id=%s", (actor_id,))
     actor_row = cursor.fetchone()
     actor_username = actor_row[0] if actor_row else "Someone"
 
-    cursor.execute("SELECT created_at FROM notifications WHERE id=?", (notif_id,))
+    cursor.execute("SELECT created_at FROM notifications WHERE id=%s", (notif_id,))
     created_at = cursor.fetchone()[0]
 
     conn.close()
@@ -362,17 +459,17 @@ def signup():
         if is_minor and parent_email.lower() == email.lower():
             return "Parent/guardian email must be different from your account email"
 
-        conn = sqlite3.connect("database.db")
+        conn = get_conn()
         cursor = conn.cursor()
 
         # check username
-        cursor.execute("SELECT * FROM users WHERE username=?", (username,))
+        cursor.execute("SELECT * FROM users WHERE username=%s", (username,))
         if cursor.fetchone():
             conn.close()
             return "Username already exists"
 
         # check email
-        cursor.execute("SELECT * FROM users WHERE email=?", (email,))
+        cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
         if cursor.fetchone():
             conn.close()
             return "Email already exists"
@@ -387,25 +484,25 @@ def signup():
                 date_of_birth, parent_email, is_minor,
                 account_status, parent_consent_status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             username, email, password,
             date_of_birth, parent_email if is_minor else None, int(is_minor),
             account_status, parent_consent_status
         ))
 
+        user_id = cursor.fetchone()[0]
         conn.commit()
-        user_id = cursor.lastrowid
 
         if is_minor:
             token = secrets.token_hex(32)
             # token is valid for 48 hours
-            from datetime import timedelta
-            expires_at = (datetime.now(timezone.utc) + timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
 
             cursor.execute("""
                 INSERT INTO parent_verification_tokens(user_id, token, parent_email, expires_at)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
             """, (user_id, token, parent_email, expires_at))
             conn.commit()
             conn.close()
@@ -431,12 +528,12 @@ def signup():
 @app.route("/verify-parent/<token>")
 def verify_parent(token):
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT * FROM parent_verification_tokens
-        WHERE token=? AND used_at IS NULL
+        WHERE token=%s AND used_at IS NULL
     """, (token,))
     record = cursor.fetchone()
 
@@ -447,18 +544,21 @@ def verify_parent(token):
     # columns: id, user_id, token, parent_email, expires_at, used_at, created_at
     record_id, user_id, _, _, expires_at, _, _ = record
 
-    if datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S") < datetime.utcnow():
+    now = datetime.now(timezone.utc)
+    expires_at_cmp = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at_cmp < now:
         conn.close()
         return "This verification link has expired. Please ask your child to sign up again."
 
     cursor.execute("""
         UPDATE users SET account_status='active', parent_consent_status='verified'
-        WHERE id=?
+        WHERE id=%s
     """, (user_id,))
 
     cursor.execute("""
         UPDATE parent_verification_tokens SET used_at=CURRENT_TIMESTAMP
-        WHERE id=?
+        WHERE id=%s
     """, (record_id,))
 
     conn.commit()
@@ -478,38 +578,32 @@ def login():
         email = request.form["email"]
         password = request.form["password"]
 
-        conn = sqlite3.connect("database.db")
+        conn = get_conn()
         cursor = conn.cursor()
 
         cursor.execute("""
             SELECT * FROM users
-            WHERE email=? AND password=?
+            WHERE email=%s AND password=%s
         """, (email, password))
 
         user = cursor.fetchone()
-        conn.close()
 
         if user:
             # ADDED: block login while a minor's account is awaiting
-            # parent verification. account_status is column index 9
-            # given the current INSERT order (id, username, email,
-            # password, ...older columns..., date_of_birth, parent_email,
-            # is_minor, account_status, parent_consent_status) — safest
-            # to look it up by name instead of trusting index position.
-            cursor2_conn = sqlite3.connect("database.db")
-            cursor2_conn.row_factory = sqlite3.Row
-            cursor2 = cursor2_conn.cursor()
-            cursor2.execute("SELECT account_status FROM users WHERE id=?", (user[0],))
-            status_row = cursor2.fetchone()
-            cursor2_conn.close()
+            # parent verification. Looked up by name (not index position)
+            # to stay safe regardless of column order.
+            cursor.execute("SELECT account_status FROM users WHERE id=%s", (user[0],))
+            status_row = cursor.fetchone()
+            conn.close()
 
-            if status_row and status_row["account_status"] == "pending_consent":
+            if status_row and status_row[0] == "pending_consent":
                 return "This account is awaiting parent/guardian verification. Ask them to check their email."
 
             session["user_id"] = user[0]
             session["username"] = user[1]
             return redirect("/feed")
 
+        conn.close()
         return "Invalid credentials"
 
     return render_template("login.html")
@@ -524,7 +618,7 @@ def feed():
     if "user_id" not in session:
         return redirect("/login")
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     # posts (feed)
@@ -555,11 +649,11 @@ FROM posts
 JOIN users
 ON posts.user_id = users.id
 
-WHERE posts.user_id = ?
+WHERE posts.user_id = %s
 OR posts.user_id IN (
     SELECT following_id
     FROM followers
-    WHERE follower_id = ?
+    WHERE follower_id = %s
 )
 
 ORDER BY posts.id DESC
@@ -592,9 +686,9 @@ ORDER BY comments.id ASC
     cursor.execute("""
 SELECT id, username
 FROM users
-WHERE id != ?
+WHERE id != %s
 AND id NOT IN (
-    SELECT following_id FROM followers WHERE follower_id = ?
+    SELECT following_id FROM followers WHERE follower_id = %s
 )
 LIMIT 5
 """, (session["user_id"], session["user_id"]))
@@ -626,17 +720,12 @@ def create_post():
     print("CONTENT:", content)
     print("IMAGE:", image)
 
- # =========================
+    # =========================
     # CYBERBULLYING DETECTION
     # =========================
-    if model is not None and word_vectorizer is not None and char_vectorizer is not None:
+    prediction = classify_text(content)
 
-        word_vec = word_vectorizer.transform([content])
-        char_vec = char_vectorizer.transform([content])
-
-        text_vec = hstack([word_vec, char_vec])
-
-        prediction = model.predict(text_vec)[0]
+    if prediction is not None:
 
         print("🔍 Post Prediction:", prediction)
 
@@ -751,9 +840,6 @@ def create_post():
 </html>
 """
 
-            
-
-
     # =========================
     # IMAGE UPLOAD
     # =========================
@@ -771,16 +857,15 @@ def create_post():
 
         print("✅ Image saved:", filename)
 
-
     # =========================
     # SAVE POST
     # =========================
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         INSERT INTO posts(user_id, content, image)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
     """,
     (
         session["user_id"],
@@ -802,13 +887,13 @@ def like(post_id):
     if "user_id" not in session:
         return jsonify({"success": False}), 401
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT *
         FROM likes
-        WHERE post_id=? AND user_id=?
+        WHERE post_id=%s AND user_id=%s
     """, (post_id, session["user_id"]))
 
     existing = cursor.fetchone()
@@ -816,12 +901,12 @@ def like(post_id):
     if existing:
         cursor.execute("""
             DELETE FROM likes
-            WHERE post_id=? AND user_id=?
+            WHERE post_id=%s AND user_id=%s
         """, (post_id, session["user_id"]))
     else:
         cursor.execute("""
             INSERT INTO likes(post_id, user_id)
-            VALUES (?, ?)
+            VALUES (%s, %s)
         """, (post_id, session["user_id"]))
 
     conn.commit()
@@ -829,7 +914,7 @@ def like(post_id):
     cursor.execute("""
         SELECT COUNT(*)
         FROM likes
-        WHERE post_id=?
+        WHERE post_id=%s
     """, (post_id,))
 
     likes = cursor.fetchone()[0]
@@ -837,7 +922,7 @@ def like(post_id):
     # only notify on a fresh like, not on unlike
     notify_recipient = None
     if not existing:
-        cursor.execute("SELECT user_id FROM posts WHERE id=?", (post_id,))
+        cursor.execute("SELECT user_id FROM posts WHERE id=%s", (post_id,))
         post_owner_row = cursor.fetchone()
         if post_owner_row:
             notify_recipient = post_owner_row[0]
@@ -869,44 +954,33 @@ def like(post_id):
 # COMMENT
 # =========================
 @app.route("/comment", methods=["POST"])
-
 def comment():
 
     print("===== COMMENT ROUTE HIT =====")
-
     print(request.form)
 
-
-
     if "user_id" not in session:
-
         return redirect("/login")
 
-
-
     post_id = request.form["post_id"]
-
     comment_text = request.form["comment"]
 
     print(post_id)
-
     print(comment_text)
 
     # =========================
     # CYBERBULLYING DETECTION
+    # (fixed indentation bug from the original file — this whole block
+    # is now correctly nested so it can never run with an undefined
+    # `prediction` if the model failed to load)
     # =========================
-    if model is not None and word_vectorizer is not None and char_vectorizer is not None:
+    prediction = classify_text(comment_text)
 
-     word_vec = word_vectorizer.transform([comment_text])
-     char_vec = char_vectorizer.transform([comment_text])
+    if prediction is not None:
 
-     text_vec = hstack([word_vec, char_vec])
+        print("🔍 Comment Prediction:", prediction)
 
-     prediction = model.predict(text_vec)[0]
-
-    print("🔍 Comment Prediction:", prediction)
-
-    if str(prediction).lower() in ["toxic", "hatespeech"]:
+        if str(prediction).lower() in ["toxic", "hatespeech"]:
 
             # ADDED: notify parent if this account belongs to a minor
             notify_parent_of_flagged_content(
@@ -966,7 +1040,7 @@ h1 {{
     color: #111827;
     font-weight: bold;
     letter-spacing: 1px;
-    
+
 }}
 
 
@@ -1012,12 +1086,12 @@ h1 {{
 </html>
 """
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         INSERT INTO comments(post_id, user_id, comment)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
     """, (post_id, session["user_id"], comment_text))
 
     conn.commit()
@@ -1026,13 +1100,13 @@ h1 {{
     cursor.execute("""
 SELECT COUNT(*)
 FROM comments
-WHERE post_id = ?
+WHERE post_id = %s
 """, (post_id,))
 
     comment_count = cursor.fetchone()[0]
 
     # notify the post owner about the new comment
-    cursor.execute("SELECT user_id FROM posts WHERE id=?", (post_id,))
+    cursor.execute("SELECT user_id FROM posts WHERE id=%s", (post_id,))
     post_owner_row = cursor.fetchone()
     notify_recipient = post_owner_row[0] if post_owner_row else None
 
@@ -1070,7 +1144,7 @@ def profile(username):
         return redirect("/login")
 
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
 
@@ -1086,7 +1160,7 @@ def profile(username):
             location,
             website
         FROM users
-        WHERE username=?
+        WHERE username=%s
     """, (username,))
 
 
@@ -1109,7 +1183,7 @@ def profile(username):
     cursor.execute("""
         SELECT COUNT(*)
         FROM followers
-        WHERE following_id=?
+        WHERE following_id=%s
     """, (profile_id,))
 
 
@@ -1122,7 +1196,7 @@ def profile(username):
     cursor.execute("""
         SELECT COUNT(*)
         FROM followers
-        WHERE follower_id=?
+        WHERE follower_id=%s
     """, (profile_id,))
 
 
@@ -1135,8 +1209,8 @@ def profile(username):
     cursor.execute("""
         SELECT id
         FROM followers
-        WHERE follower_id=?
-        AND following_id=?
+        WHERE follower_id=%s
+        AND following_id=%s
     """,
     (
         session["user_id"],
@@ -1169,7 +1243,7 @@ def profile(username):
         LEFT JOIN likes
         ON posts.id = likes.post_id
 
-        WHERE posts.user_id=?
+        WHERE posts.user_id=%s
 
         GROUP BY posts.id
 
@@ -1199,7 +1273,7 @@ def profile(username):
         JOIN users
         ON comments.user_id = users.id
         WHERE comments.post_id IN (
-            SELECT id FROM posts WHERE user_id=?
+            SELECT id FROM posts WHERE user_id=%s
         )
         ORDER BY comments.id ASC
     """, (profile_id,))
@@ -1232,12 +1306,12 @@ def follow(user_id):
     if session["user_id"] == user_id:
         return redirect("/feed")
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT * FROM followers
-        WHERE follower_id=? AND following_id=?
+        WHERE follower_id=%s AND following_id=%s
     """, (session["user_id"], user_id))
 
     existing = cursor.fetchone()
@@ -1245,7 +1319,7 @@ def follow(user_id):
     if not existing:
         cursor.execute("""
             INSERT INTO followers(follower_id, following_id)
-            VALUES (?, ?)
+            VALUES (%s, %s)
         """, (session["user_id"], user_id))
         conn.commit()
         conn.close()
@@ -1262,7 +1336,7 @@ def follow(user_id):
     else:
         cursor.execute("""
             DELETE FROM followers
-            WHERE follower_id=? AND following_id=?
+            WHERE follower_id=%s AND following_id=%s
         """, (session["user_id"], user_id))
         conn.commit()
         conn.close()
@@ -1277,12 +1351,12 @@ def delete_post(post_id):
     if "user_id" not in session:
         return redirect("/login")
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     # check post owner
     cursor.execute("""
-        SELECT user_id FROM posts WHERE id=?
+        SELECT user_id FROM posts WHERE id=%s
     """, (post_id,))
 
     post = cursor.fetchone()
@@ -1290,9 +1364,9 @@ def delete_post(post_id):
     if post and post[0] == session["user_id"]:
 
         # delete related data first
-        cursor.execute("DELETE FROM comments WHERE post_id=?", (post_id,))
-        cursor.execute("DELETE FROM likes WHERE post_id=?", (post_id,))
-        cursor.execute("DELETE FROM posts WHERE id=?", (post_id,))
+        cursor.execute("DELETE FROM comments WHERE post_id=%s", (post_id,))
+        cursor.execute("DELETE FROM likes WHERE post_id=%s", (post_id,))
+        cursor.execute("DELETE FROM posts WHERE id=%s", (post_id,))
 
         conn.commit()
 
@@ -1305,12 +1379,12 @@ def delete_comment(comment_id):
     if "user_id" not in session:
         return redirect("/login")
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         DELETE FROM comments
-        WHERE id=? AND user_id=?
+        WHERE id=%s AND user_id=%s
     """, (comment_id, session["user_id"]))
 
     conn.commit()
@@ -1330,13 +1404,13 @@ def search():
 
     query = request.args.get("q", "")
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
         SELECT id, username
         FROM users
-        WHERE username LIKE ?
+        WHERE username LIKE %s
     """, ('%' + query + '%',))
 
     users = cursor.fetchall()
@@ -1369,19 +1443,19 @@ def before_request():
 
 @app.route("/db")
 def db_page():
-    import sqlite3
+    conn = get_conn()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row   # ⭐ IMPORTANT FIX
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    cursor.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema='public'
+    """)
     tables = cursor.fetchall()
 
     db_data = {}
 
     for table in tables:
-        table_name = table["name"]
+        table_name = table["table_name"]
 
         cursor.execute(f"SELECT * FROM {table_name} LIMIT 20")
         rows = cursor.fetchall()
@@ -1407,7 +1481,7 @@ def get_notifications():
     if "user_id" not in session:
         return jsonify({"success": False}), 401
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -1421,7 +1495,7 @@ def get_notifications():
             users.username
         FROM notifications
         JOIN users ON users.id = notifications.actor_id
-        WHERE notifications.recipient_id = ?
+        WHERE notifications.recipient_id = %s
         ORDER BY notifications.created_at DESC
         LIMIT 30
     """, (session["user_id"],))
@@ -1449,11 +1523,11 @@ def unread_count():
     if "user_id" not in session:
         return jsonify({"success": False}), 401
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT COUNT(*) FROM notifications
-        WHERE recipient_id=? AND is_read=0
+        WHERE recipient_id=%s AND is_read=0
     """, (session["user_id"],))
     count = cursor.fetchone()[0]
     conn.close()
@@ -1466,11 +1540,11 @@ def mark_read():
     if "user_id" not in session:
         return jsonify({"success": False}), 401
 
-    conn = sqlite3.connect("database.db")
+    conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE notifications SET is_read=1
-        WHERE recipient_id=?
+        WHERE recipient_id=%s
     """, (session["user_id"],))
     conn.commit()
     conn.close()
@@ -1481,6 +1555,9 @@ def mark_read():
 # =========================
 # RUN
 # =========================
-
+# Render sets the PORT environment variable dynamically — binding to a
+# hardcoded 5000 would fail in production, so this falls back to 5000
+# only for local development.
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host="0.0.0.0", port=port, debug=True)

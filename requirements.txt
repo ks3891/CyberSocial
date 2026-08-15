@@ -1,0 +1,8 @@
+Flask
+Flask-SocketIO
+psycopg2-binary
+python-dotenv
+Werkzeug
+joblib
+scikit-learn
+scipy
