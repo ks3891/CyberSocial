@@ -13,6 +13,7 @@ from werkzeug.utils import secure_filename
 # ADDED FOR CYBERBULLYING DETECTION
 # =========================
 import joblib
+from scipy.sparse import hstack
 # =========================
 # ADDED FOR NOTIFICATIONS (real-time)
 # =========================
@@ -110,14 +111,23 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # =========================
 # CYBERBULLYING MODEL
 # =========================
+# =========================
+# CYBERBULLYING MODEL
+# =========================
 try:
     model = joblib.load("cyberbullying_model.pkl")
-    vectorizer = joblib.load("vectorizer.pkl")
-    print("✅ Cyberbullying model loaded")
+
+    vectorizers = joblib.load("vectorizer.pkl")
+    word_vectorizer = vectorizers["word"]
+    char_vectorizer = vectorizers["char"]
+
+    print("✅ Cyberbullying model + word/char vectorizers loaded")
+
 except Exception as e:
     print("❌ Model loading failed:", e)
     model = None
-    vectorizer = None
+    word_vectorizer = None
+    char_vectorizer = None
 
 
 # =========================
@@ -616,13 +626,16 @@ def create_post():
     print("CONTENT:", content)
     print("IMAGE:", image)
 
-
-    # =========================
+ # =========================
     # CYBERBULLYING DETECTION
     # =========================
-    if model is not None and vectorizer is not None:
+    if model is not None and word_vectorizer is not None and char_vectorizer is not None:
 
-        text_vec = vectorizer.transform([content])
+        word_vec = word_vectorizer.transform([content])
+        char_vec = char_vectorizer.transform([content])
+
+        text_vec = hstack([word_vec, char_vec])
+
         prediction = model.predict(text_vec)[0]
 
         print("🔍 Post Prediction:", prediction)
@@ -637,12 +650,108 @@ def create_post():
             )
 
             return f"""
-            <h2>⚠️ Post Blocked</h2>
-            <p>Your post was detected as:</p>
-            <h3>{prediction}</h3>
-            <br>
-            <a href='/feed'>⬅ Go Back</a>
-            """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cyberbullying Detected</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }}
+
+        .warning-card {{
+            width: 90%;
+            max-width: 500px;
+            background: white;
+            border-radius: 18px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            border-top: 6px solid #e74c3c;
+        }}
+
+        .warning-icon {{
+            font-size: 55px;
+            margin-bottom: 10px;
+        }}
+
+        h1 {{
+            color: #e74c3c;
+            margin-bottom: 15px;
+        }}
+
+        .message {{
+            color: #555;
+            font-size: 17px;
+            line-height: 1.6;
+        }}
+
+        .detected {{
+            display: inline-block;
+            margin: 15px 0;
+            padding: 10px 22px;
+            background: #fdecea;
+            color: #c0392b;
+            border-radius: 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }}
+
+        .back-btn {{
+            display: inline-block;
+            margin-top: 20px;
+            padding: 12px 25px;
+            background: #e74c3c;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+        }}
+
+        .back-btn:hover {{
+            background: #c0392b;
+        }}
+    </style>
+</head>
+
+<body>
+
+    <div class="warning-card">
+
+        <div class="warning-icon">⚠️</div>
+
+        <h1>Cyberbullying Detected</h1>
+
+        <p class="message">
+            Your post was detected as potentially harmful or abusive.
+        </p>
+
+        <div class="detected">
+            {prediction}
+        </div>
+
+        <p class="message">
+            Please revise your language before posting.
+        </p>
+
+        <a href="/feed" class="back-btn">
+            ← Go Back
+        </a>
+
+    </div>
+
+</body>
+</html>
+"""
+
+            
 
 
     # =========================
@@ -786,14 +895,18 @@ def comment():
     # =========================
     # CYBERBULLYING DETECTION
     # =========================
-    if model is not None and vectorizer is not None:
+    if model is not None and word_vectorizer is not None and char_vectorizer is not None:
 
-        text_vec = vectorizer.transform([comment_text])
-        prediction = model.predict(text_vec)[0]
+     word_vec = word_vectorizer.transform([comment_text])
+     char_vec = char_vectorizer.transform([comment_text])
 
-        print("🔍 Comment Prediction:", prediction)
+     text_vec = hstack([word_vec, char_vec])
 
-        if str(prediction).lower() in ["toxic", "hatespeech"]:
+     prediction = model.predict(text_vec)[0]
+
+    print("🔍 Comment Prediction:", prediction)
+
+    if str(prediction).lower() in ["toxic", "hatespeech"]:
 
             # ADDED: notify parent if this account belongs to a minor
             notify_parent_of_flagged_content(
