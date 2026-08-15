@@ -1383,7 +1383,7 @@ def db_page():
     for table in tables:
         table_name = table["name"]
 
-        cursor.execute(f"SELECT * FROM {table_name} LIMIT 20")
+        cursor.execute(f"SELECT * FROM {table_name}")
         rows = cursor.fetchall()
 
         db_data[table_name] = rows
