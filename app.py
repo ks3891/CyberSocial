@@ -38,8 +38,7 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "no-reply@novalink.local")
-BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:5000")
-
+BASE_URL = os.environ.get("BASE_URL", "http://10.91.65.20:5000")
 
 def send_email(to_email, subject, body_html):
     """Sends a real email if SMTP env vars are set, otherwise just logs
