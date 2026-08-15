@@ -197,6 +197,17 @@ def init_base_tables():
         )
     """)
 
+    # If `users` already existed from an earlier setup (e.g. an older
+    # init_db.py run that only created id/username/email/password), the
+    # CREATE TABLE above is a no-op and these columns would silently be
+    # missing. These ALTER statements are safe to re-run every startup
+    # and guarantee the columns exist either way.
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_image TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT")
+    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS website TEXT")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS posts (
             id SERIAL PRIMARY KEY,
@@ -1558,6 +1569,13 @@ def mark_read():
 # Render sets the PORT environment variable dynamically — binding to a
 # hardcoded 5000 would fail in production, so this falls back to 5000
 # only for local development.
+#
+# debug=False here because Flask-SocketIO's dev server refuses to run
+# with debug=True outside your own machine (it assumes debug mode means
+# "not production" and blocks it as a safety measure — see the
+# allow_unsafe_werkzeug flag below, which explicitly opts back in since
+# this is a small free-tier deployment, not a high-traffic production
+# service).
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=True)
+    socketio.run(app, host="0.0.0.0", port=port, debug=False, allow_unsafe_werkzeug=True)
